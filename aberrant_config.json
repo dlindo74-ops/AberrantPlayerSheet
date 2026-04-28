@@ -1,0 +1,513 @@
+{
+  "version": "1.0.0",
+  "app_name": "Aberrant Character Sheet",
+  "physical_attributes": [
+    "STRENGTH",
+    "DEXTERITY",
+    "STAMINA"
+  ],
+  "mental_attributes": [
+    "PERCEPTION",
+    "INTELLIGENCE",
+    "WITS"
+  ],
+  "social_attributes": [
+    "APPEARANCE",
+    "MANIPULATION",
+    "CHARISMA"
+  ],
+  "abilities": {
+    "STRENGTH": [
+      "Brawl",
+      "Might"
+    ],
+    "DEXTERITY": [
+      "Athletics",
+      "Drive",
+      "Firearms",
+      "Legerdemain",
+      "Martial Arts",
+      "Melee",
+      "Pilot",
+      "Stealth"
+    ],
+    "STAMINA": [
+      "Endurance",
+      "Resistance"
+    ],
+    "PERCEPTION": [
+      "Awareness",
+      "Investigation"
+    ],
+    "INTELLIGENCE": [
+      "Academics",
+      "Bureaucracy",
+      "Computer",
+      "Engineering",
+      "Intrusion",
+      "Linguistics",
+      "Medicine",
+      "Science",
+      "Survival"
+    ],
+    "WITS": [
+      "Arts",
+      "Biz",
+      "Rapport"
+    ],
+    "APPEARANCE": [
+      "Intimidation",
+      "Style"
+    ],
+    "MANIPULATION": [
+      "Interrogation",
+      "Streetwise",
+      "Subterfuge"
+    ],
+    "CHARISMA": [
+      "Command",
+      "Etiquette",
+      "Perform"
+    ]
+  },
+  "ability_specialties": {
+    "Brawl": [
+      "Blind Fighting",
+      "Combinations",
+      "Dirty Maneuvers",
+      "Multiple Opponents",
+      "Fighting in Flight"
+    ],
+    "Might": [
+      "Climb",
+      "Dead Lift",
+      "Leap",
+      "Throw"
+    ],
+    "Athletics": [
+      "Acrobatics",
+      "Dodge",
+      "Gymnastics",
+      "Tumbling"
+    ],
+    "Drive": [
+      "Bootlegger's Reverse",
+      "Inclement Weather",
+      "Traffic"
+    ],
+    "Firearms": [
+      "Blind Fire",
+      "Cover Fire",
+      "Multiple Fire",
+      "Multiple Targets",
+      "Targeting"
+    ],
+    "Legerdemain": [
+      "Card Tricks",
+      "Palm Object",
+      "Parlor Magic",
+      "Pick Pockets",
+      "Switch Object"
+    ],
+    "Martial Arts": [
+      "Blind Fighting",
+      "Combinations",
+      "Dirty Maneuvers",
+      "Multiple Opponents"
+    ],
+    "Melee": [
+      "Ax",
+      "Chain",
+      "Club",
+      "Improvised Weapon",
+      "Knife",
+      "Nunchaku",
+      "Staff",
+      "Sword",
+      "Automobile"
+    ],
+    "Pilot": [
+      "Fighter",
+      "Frigate",
+      "Rotor",
+      "Submersible"
+    ],
+    "Stealth": [
+      "Ambush",
+      "Camouflage",
+      "Hiding in Shadows",
+      "Sneak",
+      "Trail"
+    ],
+    "Endurance": [
+      "Fasting",
+      "Holding Breath",
+      "Long-Distance Exertion",
+      "Sleep Loss"
+    ],
+    "Resistance": [
+      "Ignore Pain",
+      "Resist Disease",
+      "Resist Drugs",
+      "Resist Interrogation"
+    ],
+    "Awareness": [
+      "Acute Hearing",
+      "Keeping Watch",
+      "Sharp Sight",
+      "Smell",
+      "Spot Ambush",
+      "Track"
+    ],
+    "Investigation": [
+      "Analysis",
+      "Concealed Objects",
+      "Deduction",
+      "Interviews",
+      "Quick Search",
+      "Research"
+    ],
+    "Academics": [
+      "Anthropology",
+      "Culture",
+      "Current Events",
+      "Geography",
+      "History",
+      "Law",
+      "Organization",
+      "Philosophy",
+      "Politics",
+      "Religion"
+    ],
+    "Bureaucracy": [
+      "Administration",
+      "Procedures",
+      "Regulations",
+      "Requisition",
+      "Rumors",
+      "UN"
+    ],
+    "Computer": [
+      "Data Retrieval",
+      "Hacking",
+      "Programming",
+      "the OpNet"
+    ],
+    "Engineering": [
+      "Armaments",
+      "Computers",
+      "Construction",
+      "Electronics",
+      "Energy Sources",
+      "Mechanics",
+      "Telecommunications",
+      "Vehicles"
+    ],
+    "Intrusion": [
+      "Countermeasures",
+      "Electronic Infiltration",
+      "Lock Picking",
+      "Security Procedures"
+    ],
+    "Linguistics": [
+      "Arabic",
+      "Bengali",
+      "Cambodian",
+      "Chinese",
+      "English",
+      "French",
+      "German",
+      "Hebrew",
+      "Hindi",
+      "Italian",
+      "Korean",
+      "Japanese",
+      "Norwegian",
+      "Portuguese",
+      "Russian",
+      "Spanish",
+      "Swahili",
+      "Turkish"
+    ],
+    "Medicine": [
+      "Emergency",
+      "First Aid",
+      "Novas",
+      "Pharmacy",
+      "Neurology",
+      "Oncology",
+      "Surgery"
+    ],
+    "Science": [
+      "Astronomy",
+      "Biology",
+      "Botany",
+      "Chemistry",
+      "Geology",
+      "Mathematics",
+      "Physics",
+      "Quantum Theory",
+      "Zoology"
+    ],
+    "Survival": [
+      "Fire-Building",
+      "Forage",
+      "Hunt",
+      "Navigation",
+      "Set Traps",
+      "Track"
+    ],
+    "Arts": [
+      "Composition",
+      "Design",
+      "Drawing",
+      "Painting",
+      "Poetry",
+      "Sculpture",
+      "Writing"
+    ],
+    "Biz": [
+      "Controller",
+      "Down Market",
+      "Merchandising",
+      "Positioning",
+      "Stocks & Bonds"
+    ],
+    "Rapport": [
+      "Discern Motivation",
+      "Discern Truth",
+      "Emotional State",
+      "Intent"
+    ],
+    "Intimidation": [
+      "Implied Threat",
+      "Overt Display",
+      "Silent Urging"
+    ],
+    "Style": [
+      "Disguise",
+      "Fashion",
+      "Makeup",
+      "Seduction"
+    ],
+    "Interrogation": [
+      "Drugs",
+      "Misdirection",
+      "Threats",
+      "Torture"
+    ],
+    "Streetwise": [
+      "Black Market",
+      "Customs",
+      "Fence",
+      "Information",
+      "Scrounge",
+      "Street Trade"
+    ],
+    "Subterfuge": [
+      "Con",
+      "Deception",
+      "Gossip",
+      "Lying",
+      "Seduction"
+    ],
+    "Command": [
+      "Crowd Control",
+      "Discipline",
+      "Field Command",
+      "Political Leadership",
+      "Tactics"
+    ],
+    "Etiquette": [
+      "Diplomacy",
+      "Negotiation",
+      "Social Graces",
+      "Sound Bites",
+      "Tact"
+    ],
+    "Perform": [
+      "Acting",
+      "Dance",
+      "Impersonation",
+      "Oration",
+      "Singing",
+      "Specific Instrument"
+    ]
+  },
+  "max_attribute_dots": 5,
+  "max_ability_dots": 5,
+  "max_willpower": 10,
+  "max_taint": 10,
+  "max_quantum": 10,
+  "max_quantum_pool": 34,
+  "health_levels": [
+    {
+      "label": "Bruised",
+      "penalty": "-0"
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "",
+      "penalty": ""
+    },
+    {
+      "label": "Incapacitated",
+      "penalty": ""
+    },
+    {
+      "label": "Dead",
+      "penalty": ""
+    }
+  ],
+  "mega_attributes": [
+    "Mega-Strength",
+    "Mega-Dexterity",
+    "Mega-Stamina",
+    "Mega-Perception",
+    "Mega-Intelligence",
+    "Mega-Wits",
+    "Mega-Appearance",
+    "Mega-Manipulation",
+    "Mega-Charisma"
+  ],
+  "num_quantum_powers": 10,
+  "num_attack_rows": 5,
+  "num_armor_rows": 5,
+  "mega_attribute_enhancements": {
+    "Mega-Strength": [
+      "Crush",
+      "Shockwave",
+      "Lifter",
+      "Quantum Leap",
+      "Thunderclap"
+    ],
+    "Mega-Dexterity": [
+      "Accuracy",
+      "Enhanced Movement",
+      "Fast Tasks",
+      "Flexibility",
+      "Physical Prodigy",
+      "Catfooted",
+      "Rapid Strike"
+    ],
+    "Mega-Stamina": [
+      "Adaptability",
+      "Durability",
+      "Hardbody",
+      "Regeneration",
+      "Resiliency",
+      "Staying Power"
+    ],
+    "Mega-Perception": [
+      "Analytic Taste/Touch",
+      "Blindfighting",
+      "High-End Electromagnetic Scan",
+      "Hyperenhanced Hearing",
+      "Microscopic Vision",
+      "Quantum Attunement",
+      "Telescopic Vision",
+      "Ultraperipheral Perception"
+    ],
+    "Mega-Intelligence": [
+      "Analyze Weakness",
+      "Enhanced Memory",
+      "Eidetic Memory",
+      "Mental Prodigy",
+      "Scientific Prodigy",
+      "Speed Reading",
+      "Taint Resistance"
+    ],
+    "Mega-Wits": [
+      "Enhanced Initiative",
+      "Lie Detector",
+      "Multitasking",
+      "Quickness",
+      "Synergy"
+    ],
+    "Mega-Appearance": [
+      "Appearance Alteration",
+      "Awe-Inspiring",
+      "Copycat",
+      "Face of Terror",
+      "Seductive Looks"
+    ],
+    "Mega-Manipulation": [
+      "Hypnotic Gaze",
+      "Persuasion",
+      "Subliminal Impulse",
+      "The Voice"
+    ],
+    "Mega-Charisma": [
+      "Dreadful Mien",
+      "Inspire",
+      "Natural Agitator",
+      "Soothe",
+      "Commanding Presence"
+    ]
+  },
+  "backgrounds": [
+    "Allies",
+    "Attunement",
+    "Backing",
+    "Cipher",
+    "Contacts",
+    "Dormancy",
+    "Eufiber",
+    "Followers",
+    "Influence",
+    "Mentor",
+    "Node",
+    "Resources"
+  ]
+}
