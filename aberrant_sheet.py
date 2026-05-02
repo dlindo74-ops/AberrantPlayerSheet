@@ -8,10 +8,20 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
 import os
+import re
 import sys
+import base64
+import io
 
-APP_VERSION = "1.0.0"
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aberrant_config.json")
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+APP_VERSION = "1.1.0"
+CONFIG_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aberrant_config.json")
+POWERS_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "powers.json")
 
 # ─── Colour palette ───────────────────────────────────────────────────────────
 BG_DARK   = "#2a2a2a"
@@ -38,6 +48,78 @@ def load_config():
         sys.exit(1)
 
 
+def save_config(cfg):
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        messagebox.showerror("Config Error", f"Cannot save config:\n{e}")
+
+
+def load_powers():
+    try:
+        with open(POWERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)["powers"]
+    except Exception as e:
+        messagebox.showerror("Powers Error", f"Cannot load powers:\n{e}")
+        return []
+
+
+def format_description(text):
+    if not text:
+        return ""
+    text = text.replace("/N", "\n")
+    text = text.replace("|+|", "|\n|")
+    idx = text.find("|")
+    if idx > 0 and text[idx - 1] != "\n":
+        text = text[:idx] + "\n" + text[idx:]
+    text = re.sub(r"\*\*(.+?)\*\*", lambda m: "\n**" + m.group(1) + "**\n", text)
+    return text.strip()
+
+
+def _add_description_widget(parent, text):
+    frame = tk.Frame(parent, bg=BG_DARK)
+    frame.pack(fill="x", padx=4, pady=(4, 4))
+    sb = tk.Scrollbar(frame)
+    sb.pack(side="right", fill="y")
+    tw = tk.Text(frame, height=6, wrap="word",
+                 font=("Arial", 7), bg=BG_DARK, fg=TEXT_MAIN,
+                 relief="flat", yscrollcommand=sb.set, state="normal",
+                 padx=4, pady=2)
+    tw.insert("1.0", text)
+    tw.config(state="disabled")
+    tw.pack(side="left", fill="x", expand=True)
+    sb.config(command=tw.yview)
+
+
+def migrate_char(data):
+    """Add fields introduced after 1.0.2. Returns (data, was_migrated)."""
+    migrated = False
+    if "app_version" not in data:
+        data["app_version"] = "1.0.2"
+        migrated = True
+    if "portrait" not in data:
+        data["portrait"] = ""
+        migrated = True
+    # Convert old fixed-slot custom_abilities {"ATTR__custom_0": [name, val]} →
+    # new list format {"ATTR": [[name, val], ...]}
+    custom = data.get("custom_abilities", {})
+    if any("__custom_" in k for k in custom):
+        new_custom = {}
+        for k, v in custom.items():
+            if "__custom_" in k:
+                attr = k.split("__custom_")[0]
+                name = v[0] if v else ""
+                val  = v[1] if len(v) > 1 else 0
+                if name:
+                    new_custom.setdefault(attr, []).append([name, val])
+            else:
+                new_custom[k] = v
+        data["custom_abilities"] = new_custom
+        migrated = True
+    return data, migrated
+
+
 def empty_character(cfg):
     """Return a blank character dict matching the config structure."""
     char = {
@@ -48,25 +130,24 @@ def empty_character(cfg):
                                           cfg["social_attributes"]] for a in group},
         "abilities": {},
         "ability_specialties": {},
-        "custom_abilities": {a: ["", ""] for a in
-                             cfg["physical_attributes"] + cfg["mental_attributes"] + cfg["social_attributes"]},
-        "backgrounds": {bg: 0 for bg in cfg.get("backgrounds", [])},
+        "custom_abilities": {},
+        "backgrounds": {},
         "mega_attributes": {ma: 0 for ma in cfg["mega_attributes"]},
-        "willpower_perm": 5, "willpower_temp": 5,
+        "willpower_perm": 3, "willpower_temp": 3,
         "taint_perm": 0, "taint_temp": 0,
         "aberrations": "",
         "quantum": 1,
         "quantum_pool_max": 20, "quantum_pool_current": 0,
         "attacks": [{"name": "", "acc": "", "dmg": "", "rof": "", "ft": ""} for _ in range(cfg["num_attack_rows"])],
         "armors":  [{"name": "", "b": "", "l": "", "bulk": "", "ft": ""} for _ in range(cfg["num_armor_rows"])],
-        "initiative": "", "walk": "", "run": "", "sprint": "",
         "soak_bashing": "", "soak_lethal": "",
-        "description": "",
-        "experience": ""
+        "game_notes": "",
+        "portrait": "",
+        "app_version": APP_VERSION,
     }
     for attr, skills in cfg["abilities"].items():
         for skill in skills:
-            char["abilities"][skill] = 0
+            char["abilities"][skill] = 3 if skill in ("Endurance", "Resistance") else 0
             char["ability_specialties"][skill] = False
     return char
 
@@ -181,69 +262,23 @@ def card(parent, **kwargs):
                     **kwargs)
 
 
-# ─── Main Application ─────────────────────────────────────────────────────────
-class AberrantApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.cfg = load_config()
+# ─── Character Sheet Frame ────────────────────────────────────────────────────
+class CharacterFrame(tk.Frame):
+    def __init__(self, parent, cfg, on_title_change=None):
+        super().__init__(parent, bg=BG_DARK)
+        self.cfg = cfg
         self.char = empty_character(self.cfg)
         self._current_file = None
         self._dirty = False
-        # loaded from config in _build_attrs_tab after config is available
+        self._on_title_change = on_title_change
         self._preset_specs = self.cfg.get("ability_specialties", {})
-        # runtime: skill -> list of [name_str, active_BoolVar]
         self._specialisations = {}
+        self._custom_ability_frames = {}
+        self._all_powers = load_powers()
+        self._powers_by_id = {p["PowerID"]: p for p in self._all_powers}
 
-        self.title("Aberrant Character Sheet")
-        self.configure(bg=BG_DARK)
-        self.update_idletasks()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        win_w = min(1280, sw)
-        win_h = int(sh * 0.95)
-        x = (sw - win_w) // 2
-        y = (sh - win_h) // 2
-        self.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        self.minsize(1100, 600)
-
-        self._build_menu()
         self._build_ui()
-        self.protocol("WM_DELETE_WINDOW", self._quit)
-
-        # Populate widgets from blank char
         self._load_char_to_ui()
-
-    # ── Menu ──────────────────────────────────────────────────────────────────
-    def _build_menu(self):
-        mb = tk.Menu(self, bg=BG_MID, fg=TEXT_MAIN,
-                     activebackground=ACCENT, activeforeground="white",
-                     tearoff=False)
-        self.config(menu=mb)
-
-        file_menu = tk.Menu(mb, bg=BG_MID, fg=TEXT_MAIN,
-                            activebackground=ACCENT, activeforeground="white",
-                            tearoff=False)
-        mb.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="New",     accelerator="Ctrl+N", command=self._new)
-        file_menu.add_command(label="Open…",   accelerator="Ctrl+O", command=self._open)
-        file_menu.add_separator()
-        file_menu.add_command(label="Save",    accelerator="Ctrl+S", command=self._save)
-        file_menu.add_command(label="Save As…",accelerator="Ctrl+Shift+S", command=self._save_as)
-        file_menu.add_separator()
-        file_menu.add_command(label="Quit",    accelerator="Ctrl+Q", command=self._quit)
-
-        about_menu = tk.Menu(mb, bg=BG_MID, fg=TEXT_MAIN,
-                             activebackground=ACCENT, activeforeground="white",
-                             tearoff=False)
-        mb.add_cascade(label="About", menu=about_menu)
-        about_menu.add_command(label="Help",    command=self._help)
-        about_menu.add_command(label="Version", command=self._version)
-
-        self.bind_all("<Control-n>", lambda e: self._new())
-        self.bind_all("<Control-o>", lambda e: self._open())
-        self.bind_all("<Control-s>", lambda e: self._save())
-        self.bind_all("<Control-S>", lambda e: self._save_as())
-        self.bind_all("<Control-q>", lambda e: self._quit())
 
     # ── Main UI skeleton ───────────────────────────────────────────────────────
     def _build_ui(self):
@@ -307,6 +342,8 @@ class AberrantApp(tk.Tk):
             ("ADVANTAGES",              "advs"),
             ("COMBAT",                  "combat"),
             ("QUANTUM\nPOWERS",        "powers"),
+            ("GAME NOTES",             "notes"),
+            ("PORTRAIT",               "portrait"),
         ]
         for label, key in tabs:
             btn = tk.Button(self._tab_frame, text=label,
@@ -341,10 +378,12 @@ class AberrantApp(tk.Tk):
         self._center.pack(side="left", fill="both", expand=True)
 
         self._tab_frames = {}
-        self._tab_frames["attrs"]  = self._build_attrs_tab(self._center)
-        self._tab_frames["advs"]   = self._build_advs_tab(self._center)
-        self._tab_frames["combat"] = self._build_combat_tab(self._center)
-        self._tab_frames["powers"] = self._build_powers_tab(self._center)
+        self._tab_frames["attrs"]   = self._build_attrs_tab(self._center)
+        self._tab_frames["advs"]    = self._build_advs_tab(self._center)
+        self._tab_frames["combat"]  = self._build_combat_tab(self._center)
+        self._tab_frames["powers"]  = self._build_powers_tab(self._center)
+        self._tab_frames["notes"]   = self._build_notes_tab(self._center)
+        self._tab_frames["portrait"] = self._build_portrait_tab(self._center)
 
         # Show first tab
         self._switch_tab("attrs")
@@ -447,9 +486,17 @@ class AberrantApp(tk.Tk):
         for skill in abilities:
             self._build_ability_row(frame, skill, BG_CARD)
 
-        # Two custom ability slots per attribute
-        for slot_idx in range(2):
-            self._build_custom_ability_row(frame, attr, slot_idx)
+        # Dynamic custom ability rows
+        self._custom_ability_vars[attr] = []
+        custom_container = tk.Frame(frame, bg=BG_CARD)
+        custom_container.pack(fill="x", padx=6, pady=0)
+        self._custom_ability_frames[attr] = custom_container
+
+        add_btn = tk.Label(frame, text="+ Add Ability",
+                           font=("Arial", 7, "bold"), bg=BG_CARD, fg=ACCENT,
+                           cursor="hand2")
+        add_btn.pack(anchor="w", padx=8, pady=(1, 3))
+        add_btn.bind("<Button-1>", lambda e, a=attr: self._add_custom_ability(a))
 
     def _build_ability_row(self, parent, skill, bg_color):
         # Outer container: top row + optional overflow rows
@@ -483,37 +530,18 @@ class AberrantApp(tk.Tk):
         inline_frame = tk.Frame(top_row, bg=bg_color)
         inline_frame.pack(side="left", fill="x", expand=True)
 
-        overflow_frame = tk.Frame(outer, bg=bg_color)
-        # overflow not packed until needed
-
         self._spec_refresh_funcs = getattr(self, "_spec_refresh_funcs", {})
 
         def refresh_spec_tags():
             for w in inline_frame.winfo_children():
                 w.destroy()
-            for w in overflow_frame.winfo_children():
-                w.destroy()
-            overflow_frame.pack_forget()
 
             entries = self._specialisations.get(skill, [])
-            if not entries:
-                return
-
-            # First spec inline
-            first = entries[0]
-            s_name, s_var = first
-            _make_spec_cb(inline_frame, s_name, s_var)
-
-            # Remaining specs in overflow rows (one per row)
-            if len(entries) > 1:
-                overflow_frame.pack(fill="x", padx=0)
-                for entry in entries[1:]:
-                    s_name2, s_var2 = entry
-                    row2 = tk.Frame(overflow_frame, bg=bg_color)
-                    row2.pack(fill="x")
-                    # indent to align under inline
-                    tk.Label(row2, text="", width=22, bg=bg_color).pack(side="left")
-                    _make_spec_cb(row2, s_name2, s_var2)
+            for entry in entries:
+                s_name, s_var = entry
+                row = tk.Frame(inline_frame, bg=bg_color)
+                row.pack(fill="x", anchor="w")
+                _make_spec_cb(row, s_name, s_var)
 
         def _make_spec_cb(frame, name, bvar):
             tk.Checkbutton(frame, text=name,
@@ -601,24 +629,89 @@ class AberrantApp(tk.Tk):
             self._mark_dirty()
         refresh_func()
 
-    def _build_custom_ability_row(self, parent, attr, slot_idx):
-        row = tk.Frame(parent, bg=BG_CARD)
-        row.pack(fill="x", padx=6, pady=1)
-
-        key = f"{attr}__custom_{slot_idx}"
-        name_var = tk.StringVar()
-        val_var  = tk.IntVar(value=0)
-        self._custom_ability_vars[key] = (name_var, val_var)
+    def _add_custom_ability(self, attr, name="", val=0):
+        container = self._custom_ability_frames[attr]
+        name_var = tk.StringVar(value=name)
+        val_var  = tk.IntVar(value=val)
         name_var.trace_add("write", lambda *_: self._mark_dirty())
         val_var.trace_add("write",  lambda *_: self._mark_dirty())
 
-        e = tk.Entry(row, textvariable=name_var, font=("Arial", 8),
-                     bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
-                     relief="flat", width=14)
-        e.pack(side="left")
+        row = tk.Frame(container, bg=BG_CARD)
+        row.pack(fill="x", pady=1)
 
-        dots = DotRow(row, max_dots=5, min_val=0, var=val_var, bg=BG_CARD)
-        dots.pack(side="left", padx=4)
+        entry_w = tk.Entry(row, textvariable=name_var, font=("Arial", 8),
+                           bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                           relief="flat", width=14)
+        entry_w.pack(side="left")
+        DotRow(row, max_dots=5, min_val=0, var=val_var, bg=BG_CARD).pack(side="left", padx=4)
+
+        x_lbl = tk.Label(row, text="×", font=("Arial", 9, "bold"),
+                         bg=BG_CARD, fg=TEXT_DIM, cursor="hand2")
+        x_lbl.pack(side="left", padx=(0, 2))
+
+        entry_tuple = (name_var, val_var, row)
+        self._custom_ability_vars[attr].append(entry_tuple)
+
+        def _remove(r=row, a=attr, dirty=True):
+            self._custom_ability_vars[a] = [
+                e for e in self._custom_ability_vars[a] if e[2] is not r
+            ]
+            r.destroy()
+            if dirty:
+                self._mark_dirty()
+
+        # Defer destroy so tkinter finishes the click event before the widget tree changes
+        x_lbl.bind("<Button-1>", lambda e, fn=_remove: self.after(0, fn))
+        # Auto-remove if user added the row but left it empty
+        entry_w.bind("<FocusOut>", lambda e: _remove(dirty=False) if not name_var.get().strip() else None)
+        entry_w.bind("<Escape>",   lambda e: _remove(dirty=False))
+        if not name:
+            entry_w.focus_set()
+
+    def _show_bg_menu(self, event):
+        menu = tk.Menu(self, tearoff=0,
+                       bg=BG_MID, fg=TEXT_MAIN, activebackground=ACCENT,
+                       activeforeground="white", font=("Arial", 9))
+        for bg_name in self.cfg.get("backgrounds", []):
+            menu.add_command(label=bg_name,
+                             command=lambda b=bg_name: self._add_background(name=b))
+        menu.add_separator()
+        menu.add_command(label="Custom…", command=lambda: self._add_background())
+        menu.post(event.x_root, event.y_root)
+
+    def _add_background(self, name="", val=0):
+        name_var = tk.StringVar(value=name)
+        val_var  = tk.IntVar(value=val)
+        name_var.trace_add("write", lambda *_: self._mark_dirty())
+        val_var.trace_add("write",  lambda *_: self._mark_dirty())
+
+        row = tk.Frame(self._bg_container, bg=BG_CARD)
+        row.pack(fill="x", pady=1)
+
+        entry_w = tk.Entry(row, textvariable=name_var, font=("Arial", 8),
+                           bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                           relief="flat", width=14)
+        entry_w.pack(side="left", padx=(4, 0))
+        DotRow(row, max_dots=5, min_val=0, var=val_var, bg=BG_CARD).pack(side="left", padx=4)
+
+        x_lbl = tk.Label(row, text="×", font=("Arial", 9, "bold"),
+                         bg=BG_CARD, fg=TEXT_DIM, cursor="hand2")
+        x_lbl.pack(side="left", padx=(0, 2))
+
+        entry_tuple = (name_var, val_var, row)
+        self._bg_rows.append(entry_tuple)
+
+        def _remove(r=row, dirty=True):
+            self._bg_rows = [e for e in self._bg_rows if e[2] is not r]
+            r.destroy()
+            if dirty:
+                self._mark_dirty()
+
+        x_lbl.bind("<Button-1>", lambda e, fn=_remove: self.after(0, fn))
+        entry_w.bind("<FocusOut>", lambda e: _remove(dirty=False) if not name_var.get().strip() else None)
+        entry_w.bind("<Escape>",   lambda e: _remove(dirty=False))
+        if not name:
+            entry_w.focus_set()
 
     # ── ADVANTAGES tab ────────────────────────────────────────────────────────
     def _build_advs_tab(self, parent):
@@ -635,16 +728,15 @@ class AberrantApp(tk.Tk):
         col0.grid(row=0, column=0, sticky="nsew", padx=4)
 
         section_label(col0, "BACKGROUNDS")
-        self._bg_vars = {}   # name -> IntVar
-        for bg_name in self.cfg.get("backgrounds", []):
-            row = card(col0)
-            row.pack(fill="x", pady=2)
-            vv = tk.IntVar(value=0)
-            vv.trace_add("write", lambda *_: self._mark_dirty())
-            self._bg_vars[bg_name] = vv
-            tk.Label(row, text=bg_name, font=("Arial", 8),
-                     bg=BG_CARD, fg=TEXT_MAIN, width=12, anchor="w").pack(side="left", padx=4, pady=3)
-            DotRow(row, max_dots=5, var=vv, bg=BG_CARD).pack(side="left")
+        self._bg_rows = []   # list of (name_var, val_var, row_frame)
+        self._bg_container = tk.Frame(col0, bg=BG_DARK)
+        self._bg_container.pack(fill="x", pady=0)
+
+        add_bg_btn = tk.Label(col0, text="+ Add Background",
+                              font=("Arial", 8, "bold"),
+                              bg=BG_DARK, fg=ACCENT, cursor="hand2")
+        add_bg_btn.pack(anchor="w", padx=8, pady=(1, 3))
+        add_bg_btn.bind("<Button-1>", self._show_bg_menu)
 
         # Willpower
         section_label(col0, "WILLPOWER")
@@ -729,7 +821,6 @@ class AberrantApp(tk.Tk):
             # Enhancement inline display
             inline_f  = tk.Frame(top_row, bg=BG_CARD)
             inline_f.pack(side="left", fill="x", expand=True)
-            overflow_f = tk.Frame(outer, bg=BG_CARD)
 
             def _make_enh_cb(frame, name, bvar, bg=BG_CARD):
                 tk.Checkbutton(frame, text=name, variable=bvar,
@@ -740,20 +831,13 @@ class AberrantApp(tk.Tk):
                                relief="flat", bd=0,
                                command=self._mark_dirty).pack(side="left", padx=(0, 4))
 
-            def _refresh_enh(ma=ma, inf=inline_f, ovf=overflow_f):
+            def _refresh_enh(ma=ma, inf=inline_f):
                 for w in inf.winfo_children(): w.destroy()
-                for w in ovf.winfo_children(): w.destroy()
-                ovf.pack_forget()
                 entries = self._mega_enhancements.get(ma, [])
-                if not entries: return
-                _make_enh_cb(inf, entries[0][0], entries[0][1])
-                if len(entries) > 1:
-                    ovf.pack(fill="x", padx=0)
-                    for entry in entries[1:]:
-                        r2 = tk.Frame(ovf, bg=BG_CARD)
-                        r2.pack(fill="x")
-                        tk.Label(r2, text="", width=24, bg=BG_CARD).pack(side="left")
-                        _make_enh_cb(r2, entry[0], entry[1])
+                for entry in entries:
+                    r = tk.Frame(inf, bg=BG_CARD)
+                    r.pack(fill="x", anchor="w")
+                    _make_enh_cb(r, entry[0], entry[1])
 
             self._mega_enh_refresh[ma] = _refresh_enh
             # Redraw attr tab mega-dots whenever this var changes
@@ -796,15 +880,451 @@ class AberrantApp(tk.Tk):
 
         return sf
 
-    # ── QUANTUM POWERS tab (blank for now) ───────────────────────────────────
+    # ── QUANTUM POWERS tab ───────────────────────────────────────────────────
     def _build_powers_tab(self, parent):
         sf = ScrollFrame(parent, bg=BG_DARK)
         inner = sf.inner
-        tk.Label(inner, text="QUANTUM POWERS",
-                 font=("Arial", 14, "bold"), bg=BG_DARK, fg=ACCENT).pack(pady=(30, 8))
-        tk.Label(inner, text="This section will be developed in a future update.",
-                 font=("Arial", 10), bg=BG_DARK, fg=TEXT_DIM).pack()
+
+        top = tk.Frame(inner, bg=BG_DARK)
+        top.pack(fill="x", padx=6, pady=(6, 2))
+        section_label(top, "QUANTUM POWERS")
+        add_btn = tk.Label(top, text="+ Add Power",
+                           font=("Arial", 8, "bold"), bg=BG_DARK, fg=ACCENT, cursor="hand2")
+        add_btn.pack(side="right", padx=8)
+        add_btn.bind("<Button-1>", self._show_power_picker)
+
+        grid = tk.Frame(inner, bg=BG_DARK)
+        grid.pack(fill="both", expand=True, padx=4, pady=4)
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+        self._powers_col_left  = tk.Frame(grid, bg=BG_DARK)
+        self._powers_col_right = tk.Frame(grid, bg=BG_DARK)
+        self._powers_col_left.grid(row=0, column=0, sticky="nsew", padx=2)
+        self._powers_col_right.grid(row=0, column=1, sticky="nsew", padx=2)
+
+        self._power_cards = []
         return sf
+
+    def _show_power_picker(self, event=None):
+        added_ids = {e["power_id"] for e in self._power_cards}
+        available = [
+            p for p in self._all_powers
+            if p["PowerType"] != "Miscellaneous" and p["PowerID"] not in added_ids
+        ]
+        if not available:
+            messagebox.showinfo("Powers", "All available powers have been added.")
+            return
+
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Add Quantum Power")
+        win.geometry("320x420")
+        win.grab_set()
+
+        tk.Label(win, text="Select a Power", font=("Arial", 10, "bold"),
+                 bg=BG_DARK, fg=ACCENT).pack(pady=(8, 4))
+
+        frm = tk.Frame(win, bg=BG_DARK)
+        frm.pack(fill="both", expand=True, padx=8)
+        sb = tk.Scrollbar(frm)
+        sb.pack(side="right", fill="y")
+        lb = tk.Listbox(frm, yscrollcommand=sb.set, bg=BG_MID, fg=TEXT_MAIN,
+                        selectbackground=ACCENT, font=("Arial", 9),
+                        activestyle="none", relief="flat")
+        lb.pack(side="left", fill="both", expand=True)
+        sb.config(command=lb.yview)
+
+        by_level = {}
+        for p in available:
+            by_level.setdefault(p.get("PowerLevel", "?"), []).append(p)
+
+        index_map = {}
+        i = 0
+        for level in sorted(by_level.keys(), key=str):
+            lb.insert("end", f"── Level {level} ──")
+            lb.itemconfig(i, fg=GOLD, selectbackground=BG_DARK)
+            index_map[i] = None
+            i += 1
+            for p in sorted(by_level[level], key=lambda x: x["PowerName"]):
+                tag = " ★" if p["PowerType"] == "Mastery" else ""
+                lb.insert("end", f"  {p['PowerName']}{tag}")
+                index_map[i] = p["PowerID"]
+                i += 1
+
+        def _confirm():
+            sel = lb.curselection()
+            if not sel:
+                return
+            pid = index_map.get(sel[0])
+            if pid:
+                win.destroy()
+                self._add_power_card(pid)
+
+        lb.bind("<Double-Button-1>", lambda e: _confirm())
+        tk.Button(win, text="Add", command=_confirm,
+                  bg=ACCENT, fg="white", font=("Arial", 9, "bold"),
+                  relief="flat", cursor="hand2").pack(pady=6)
+
+    def _add_cost_row(self, parent, power_data, bg, prof_var=None):
+        """Add a Cost: line. prof_var makes it live (learned = level, unlearned = 2×level)."""
+        duration = str(power_data.get("Duration", "")).strip().lower()
+        level_str = str(power_data.get("PowerLevel", "?"))
+
+        r = tk.Frame(parent, bg=bg)
+        r.pack(fill="x", padx=6, pady=(0, 1))
+        tk.Label(r, text="Cost:", font=("Arial", 7, "bold"),
+                 bg=bg, fg=TEXT_DIM, width=10, anchor="w").pack(side="left")
+
+        cost_var = tk.StringVar()
+
+        def _compute():
+            if duration == "permanent":
+                return "0 qp"
+            try:
+                lvl = int(level_str)
+            except ValueError:
+                return "?"
+            if prof_var is None:
+                return f"{lvl} qp"
+            return f"{lvl} qp" if prof_var.get() else f"{lvl * 2} qp (unlearned)"
+
+        if prof_var is not None:
+            prof_var.trace_add("write", lambda *_: cost_var.set(_compute()))
+        cost_var.set(_compute())
+
+        tk.Label(r, textvariable=cost_var, font=("Arial", 7),
+                 bg=bg, fg=TEXT_MAIN).pack(side="left")
+
+    def _add_dice_pool_row(self, parent, dice_pool_str, rating_var, bg, label_width=13):
+        """Add a Dice Pool: line with live-computed prefix and red mega indicator."""
+        r = tk.Frame(parent, bg=bg)
+        r.pack(fill="x", pady=0)
+        tk.Label(r, text="Dice Pool:", font=("Arial", 7, "bold"),
+                 bg=bg, fg=TEXT_DIM, width=label_width, anchor="w").pack(side="left")
+
+        parts = re.split(r'\s*\+\s*', dice_pool_str, maxsplit=1)
+        if len(parts) < 2:
+            tk.Label(r, text=dice_pool_str, font=("Arial", 7),
+                     bg=bg, fg=TEXT_MAIN, anchor="w").pack(side="left")
+            return
+
+        attr_raw = parts[0].strip()
+        attr_upper = attr_raw.upper()
+
+        if attr_upper == "QUANTUM":
+            base_var = self._quantum_attr_var
+            mega_var = None
+        else:
+            base_var = self._attr_vars.get(attr_upper)
+            mega_key = "Mega-" + attr_raw.capitalize()
+            mega_var = self._mega_vars.get(mega_key)
+
+        if base_var is None:
+            tk.Label(r, text=dice_pool_str, font=("Arial", 7),
+                     bg=bg, fg=TEXT_MAIN, anchor="w").pack(side="left")
+            return
+
+        num_var  = tk.StringVar()
+        mega_var2 = tk.StringVar()
+
+        def _update(*_):
+            total = base_var.get() + rating_var.get()
+            num_var.set(str(total))
+            if mega_var is not None:
+                mv = mega_var.get()
+                mega_var2.set(f" ({mv})" if mv > 0 else "")
+
+        base_var.trace_add("write", _update)
+        rating_var.trace_add("write", _update)
+        if mega_var is not None:
+            mega_var.trace_add("write", _update)
+        _update()
+
+        tk.Label(r, textvariable=num_var, font=("Arial", 7, "bold"),
+                 bg=bg, fg=TEXT_MAIN).pack(side="left")
+        if mega_var is not None:
+            tk.Label(r, textvariable=mega_var2, font=("Arial", 7, "bold"),
+                     bg=bg, fg="#cc3333").pack(side="left")
+        tk.Label(r, text=f" - {dice_pool_str}", font=("Arial", 7),
+                 bg=bg, fg=TEXT_MAIN, anchor="w",
+                 wraplength=220, justify="left").pack(side="left")
+
+    def _add_power_card(self, power_id, rating=1, techniques=None):
+        if techniques is None:
+            techniques = []
+        p = self._powers_by_id.get(power_id)
+        if not p:
+            return
+
+        col = self._powers_col_left if len(self._power_cards) % 2 == 0 else self._powers_col_right
+
+        outer = tk.Frame(col, bg=BG_CARD,
+                         highlightbackground=BORDER, highlightthickness=1)
+        outer.pack(fill="x", pady=3, padx=2)
+
+        # Header: [name]  [Qmin: X]  [×]
+        hdr = tk.Frame(outer, bg=BG_PANEL)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text=p["PowerName"], font=("Arial", 10, "bold"),
+                 bg=BG_PANEL, fg=GOLD, anchor="w").pack(side="left", padx=6, pady=4)
+        x_lbl = tk.Label(hdr, text="×", font=("Arial", 10, "bold"),
+                         bg=BG_PANEL, fg=TEXT_DIM, cursor="hand2")
+        x_lbl.pack(side="right", padx=6)
+        qmin = str(p.get("PwQuantMin", "")).strip()
+        if qmin and qmin.lower() not in ("", "n/a"):
+            tk.Label(hdr, text=f"Qmin: {qmin}", font=("Arial", 7),
+                     bg=BG_PANEL, fg=TEXT_DIM).pack(side="right", padx=(0, 4))
+
+        # Line 2: rating dots  +  cost
+        line2 = tk.Frame(outer, bg=BG_CARD)
+        line2.pack(fill="x", padx=6, pady=(2, 0))
+        tk.Label(line2, text="Rating:", font=("Arial", 8),
+                 bg=BG_CARD, fg=TEXT_DIM).pack(side="left")
+        rating_var = tk.IntVar(value=rating)
+        rating_var.trace_add("write", lambda *_: self._mark_dirty())
+        DotRow(line2, max_dots=5, min_val=1, var=rating_var, bg=BG_CARD).pack(side="left", padx=4)
+
+        # Cost inline, right-aligned on the same row as the pips
+        duration_str  = str(p.get("Duration", "")).strip().lower()
+        level_str_p   = str(p.get("PowerLevel", "?"))
+        cost_var_main = tk.StringVar()
+        def _compute_main_cost():
+            if duration_str == "permanent":
+                return "0 qp"
+            try:
+                return f"{int(level_str_p)} qp"
+            except ValueError:
+                return "?"
+        cost_var_main.set(_compute_main_cost())
+        tk.Label(line2, textvariable=cost_var_main, font=("Arial", 7),
+                 bg=BG_CARD, fg=TEXT_DIM).pack(side="right", padx=(0, 4))
+
+        # Stat block (Dice Pool handled separately; PwQuantMin moved to header)
+        stats_frame = tk.Frame(outer, bg=BG_CARD)
+        stats_frame.pack(fill="x", padx=6, pady=2)
+
+        dice_pool = str(p.get("DicePool", "")).strip()
+        if dice_pool and dice_pool.lower() not in ("", "n/a"):
+            self._add_dice_pool_row(stats_frame, dice_pool, rating_var, BG_CARD)
+
+        other_stat_fields = [
+            ("Range",        "Range"),
+            ("Area",         "Area"),
+            ("Duration",     "Duration"),
+            ("Multi-Action", "MultipleActions"),
+            ("Effect",       "Effect"),
+            ("Extras",       "Extras"),
+        ]
+        for lbl, key in other_stat_fields:
+            val = str(p.get(key, "")).strip()
+            if val and val.lower() not in ("", "none", "n/a"):
+                r = tk.Frame(stats_frame, bg=BG_CARD)
+                r.pack(fill="x", pady=0)
+                tk.Label(r, text=f"{lbl}:", font=("Arial", 7, "bold"),
+                         bg=BG_CARD, fg=TEXT_DIM, width=13, anchor="w").pack(side="left")
+                tk.Label(r, text=val, font=("Arial", 7),
+                         bg=BG_CARD, fg=TEXT_MAIN, anchor="w",
+                         wraplength=200, justify="left").pack(side="left", fill="x", expand=True)
+
+        desc_text = format_description(p.get("Description", ""))
+        if desc_text:
+            _add_description_widget(outer, desc_text)
+
+        tech_vars = {}
+        if p["PowerType"] == "Mastery":
+            sub_hdr = tk.Frame(outer, bg=BG_MID)
+            sub_hdr.pack(fill="x", pady=(4, 0))
+            tk.Label(sub_hdr, text="TECHNIQUES", font=("Arial", 7, "bold"),
+                     bg=BG_MID, fg=ACCENT).pack(side="left", padx=6, pady=2)
+            for sp in sorted(p.get("SubPowers", []), key=lambda x: x.get("ResolveOrder", 0)):
+                proficient = sp["SubPowerID"] in techniques
+                bv = self._add_sub_power_box(outer, sp, proficient,
+                                             rating_var, p.get("PowerLevel", "?"))
+                tech_vars[sp["SubPowerID"]] = bv
+
+        entry = {
+            "power_id":   power_id,
+            "rating_var": rating_var,
+            "tech_vars":  tech_vars,
+            "frame":      outer,
+        }
+        self._power_cards.append(entry)
+
+        def _remove(e=entry, f=outer):
+            self._power_cards = [c for c in self._power_cards if c is not e]
+            self.after(0, f.destroy)
+            self._mark_dirty()
+
+        x_lbl.bind("<Button-1>", lambda ev, fn=_remove: self.after(0, fn))
+        self._mark_dirty()
+
+    def _add_sub_power_box(self, parent, sp, proficient=False,
+                           rating_var=None, power_level="?"):
+        box = tk.Frame(parent, bg=BG_MID,
+                       highlightbackground=BORDER, highlightthickness=1)
+        box.pack(fill="x", padx=4, pady=2)
+
+        name_row = tk.Frame(box, bg=BG_MID)
+        name_row.pack(fill="x", padx=4, pady=(3, 1))
+        bv = tk.BooleanVar(value=proficient)
+        bv.trace_add("write", lambda *_: self._mark_dirty())
+        CheckBox(name_row, var=bv, bg=BG_MID).pack(side="left", padx=(0, 4))
+        tk.Label(name_row, text=sp.get("SubPowerName", ""),
+                 font=("Arial", 8, "bold"), bg=BG_MID, fg=TEXT_MAIN,
+                 anchor="w").pack(side="left")
+
+        # Cost row (live: learned = level, unlearned = 2×level)
+        sp_data_for_cost = {"PowerLevel": power_level,
+                            "Duration": sp.get("Duration", "")}
+        self._add_cost_row(box, sp_data_for_cost, BG_MID, prof_var=bv)
+
+        stats = tk.Frame(box, bg=BG_MID)
+        stats.pack(fill="x", padx=6, pady=1)
+
+        dice_pool = str(sp.get("DicePool", "")).strip()
+        if dice_pool and dice_pool.lower() not in ("", "n/a") and rating_var is not None:
+            self._add_dice_pool_row(stats, dice_pool, rating_var, BG_MID, label_width=10)
+
+        sub_stat_fields = [
+            ("Range",    "Range"),
+            ("Area",     "Area"),
+            ("Duration", "Duration"),
+        ]
+        for lbl, key in sub_stat_fields:
+            val = str(sp.get(key, "")).strip()
+            if val and val.lower() not in ("", "n/a"):
+                r = tk.Frame(stats, bg=BG_MID)
+                r.pack(fill="x")
+                tk.Label(r, text=f"{lbl}:", font=("Arial", 7, "bold"),
+                         bg=BG_MID, fg=TEXT_DIM, width=10, anchor="w").pack(side="left")
+                tk.Label(r, text=val, font=("Arial", 7),
+                         bg=BG_MID, fg=TEXT_MAIN, anchor="w",
+                         wraplength=180, justify="left").pack(side="left", fill="x", expand=True)
+
+        desc_text = format_description(sp.get("Description", ""))
+        if desc_text:
+            _add_description_widget(box, desc_text)
+
+        return bv
+
+    # ── GAME NOTES tab ───────────────────────────────────────────────────────
+    def _build_notes_tab(self, parent):
+        frame = tk.Frame(parent, bg=BG_DARK)
+        section_label(frame, "GAME NOTES")
+        notes_card = tk.Frame(frame, bg=BG_CARD,
+                              highlightbackground=BORDER, highlightthickness=1)
+        notes_card.pack(fill="both", expand=True, padx=8, pady=4)
+        self._notes_text = tk.Text(notes_card, font=("Arial", 9),
+                                   bg=BG_MID, fg=TEXT_MAIN,
+                                   insertbackground=TEXT_MAIN,
+                                   relief="flat", wrap="word")
+        vsb = tk.Scrollbar(notes_card, command=self._notes_text.yview)
+        vsb.pack(side="right", fill="y")
+        self._notes_text.configure(yscrollcommand=vsb.set)
+        self._notes_text.pack(fill="both", expand=True, padx=4, pady=4)
+        self._notes_text.bind("<<Modified>>", self._on_notes_change)
+        return frame
+
+    def _on_notes_change(self, e):
+        self._mark_dirty()
+        self._notes_text.edit_modified(False)
+
+    # ── PORTRAIT tab ──────────────────────────────────────────────────────────
+    PORTRAIT_W = 240
+    PORTRAIT_H = 320
+
+    def _build_portrait_tab(self, parent):
+        frame = tk.Frame(parent, bg=BG_DARK)
+        self._portrait_b64 = ""
+        self._portrait_photo = None  # keep reference to avoid GC
+
+        tk.Label(frame, text="CHARACTER PORTRAIT",
+                 font=("Arial", 13, "bold"), bg=BG_DARK, fg=ACCENT).pack(pady=(18, 10))
+
+        # Image display canvas
+        canvas = tk.Canvas(frame, width=self.PORTRAIT_W, height=self.PORTRAIT_H,
+                           bg=BG_MID, highlightbackground=BORDER, highlightthickness=2)
+        canvas.pack()
+        self._portrait_canvas = canvas
+        self._portrait_canvas_img_id = None
+
+        self._draw_portrait_placeholder()
+
+        # Buttons
+        btn_row = tk.Frame(frame, bg=BG_DARK)
+        btn_row.pack(pady=12)
+
+        def _btn(text, cmd):
+            return tk.Button(btn_row, text=text, command=cmd,
+                             bg=ACCENT, fg="white", relief="flat",
+                             font=("Arial", 9, "bold"), padx=12, pady=4,
+                             cursor="hand2")
+
+        if PIL_AVAILABLE:
+            _btn("Load Image…", self._load_portrait).pack(side="left", padx=6)
+            _btn("Clear",       self._clear_portrait).pack(side="left", padx=6)
+        else:
+            tk.Label(frame,
+                     text="Pillow is not installed.\nInstall it with:  pip install Pillow",
+                     font=("Arial", 9), bg=BG_DARK, fg=TEXT_DIM,
+                     justify="center").pack(pady=4)
+
+        return frame
+
+    def _draw_portrait_placeholder(self):
+        c = self._portrait_canvas
+        c.delete("all")
+        self._portrait_canvas_img_id = None
+        w, h = self.PORTRAIT_W, self.PORTRAIT_H
+        c.create_line(0, 0, w, h, fill=BORDER, width=1)
+        c.create_line(w, 0, 0, h, fill=BORDER, width=1)
+        c.create_text(w // 2, h // 2, text="No Portrait",
+                      fill=TEXT_DIM, font=("Arial", 11, "italic"))
+
+    def _refresh_portrait(self):
+        if not self._portrait_b64 or not PIL_AVAILABLE:
+            self._draw_portrait_placeholder()
+            return
+        try:
+            raw = base64.b64decode(self._portrait_b64)
+            img = Image.open(io.BytesIO(raw))
+            img.thumbnail((self.PORTRAIT_W, self.PORTRAIT_H), Image.LANCZOS)
+            # Centre on canvas
+            c = self._portrait_canvas
+            c.delete("all")
+            self._portrait_photo = ImageTk.PhotoImage(img)
+            x = self.PORTRAIT_W // 2
+            y = self.PORTRAIT_H // 2
+            self._portrait_canvas_img_id = c.create_image(x, y, anchor="center",
+                                                           image=self._portrait_photo)
+        except Exception:
+            self._draw_portrait_placeholder()
+
+    def _load_portrait(self):
+        path = filedialog.askopenfilename(
+            title="Select Portrait Image",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tiff *.tif"),
+                ("All files", "*.*"),
+            ]
+        )
+        if not path:
+            return
+        try:
+            img = Image.open(path).convert("RGB")
+            img.thumbnail((300, 400), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            self._portrait_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            self._refresh_portrait()
+            self._mark_dirty()
+        except Exception as e:
+            messagebox.showerror("Image Error", f"Could not load image:\n{e}")
+
+    def _clear_portrait(self):
+        self._portrait_b64 = ""
+        self._portrait_photo = None
+        self._draw_portrait_placeholder()
+        self._mark_dirty()
 
     def _add_mega_enhancement(self, ma, name, refresh_func):
         if ma not in self._mega_enhancements:
@@ -812,6 +1332,8 @@ class AberrantApp(tk.Tk):
         if name not in [e[0] for e in self._mega_enhancements[ma]]:
             bv = tk.BooleanVar(value=False)
             bv.trace_add("write", lambda *_: self._mark_dirty())
+            if ma == "Mega-Wits" and name == "Enhanced Initiative":
+                bv.trace_add("write", self._recalc_initiative)
             self._mega_enhancements[ma].append([name, bv])
             self._mark_dirty()
         refresh_func()
@@ -877,6 +1399,22 @@ class AberrantApp(tk.Tk):
 
         return checks
 
+    def _recalc_initiative(self, *_):
+        dex  = self._attr_vars.get("DEXTERITY", tk.IntVar(value=0)).get()
+        wits = self._attr_vars.get("WITS",      tk.IntVar(value=0)).get()
+        base = dex + wits
+        enh = any(
+            name == "Enhanced Initiative" and bv.get()
+            for name, bv in self._mega_enhancements.get("Mega-Wits", [])
+        )
+        self._initiative_var.set(f"{base} (+5)" if enh else str(base))
+
+    def _recalc_movement(self, *_):
+        dex = self._attr_vars.get("DEXTERITY", tk.IntVar(value=0)).get()
+        self._move_vars["walk"].set("7")
+        self._move_vars["run"].set(str(dex + 12))
+        self._move_vars["sprint"].set(str(dex * 3 + 20))
+
     # ── COMBAT tab ─────────────────────────────────────────────────────────────
     def _build_combat_tab(self, parent):
         sf = ScrollFrame(parent, bg=BG_DARK)
@@ -934,18 +1472,19 @@ class AberrantApp(tk.Tk):
         ims = tk.Frame(inner, bg=BG_DARK)
         ims.pack(fill="x", padx=4, pady=4)
 
-        # Initiative
+        # Initiative (auto-calculated: Dexterity + Wits)
         ini_f = card(ims)
         ini_f.pack(side="left", fill="both", expand=True, padx=2)
         tk.Label(ini_f, text="INITIATIVE", font=("Arial", 9, "bold"),
                  bg=BG_CARD, fg=GOLD).pack()
         self._initiative_var = tk.StringVar()
-        self._initiative_var.trace_add("write", lambda *_: self._mark_dirty())
-        tk.Entry(ini_f, textvariable=self._initiative_var, font=("Arial", 9),
-                 bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
-                 relief="flat", width=10, justify="center").pack(padx=6, pady=4)
+        tk.Label(ini_f, textvariable=self._initiative_var,
+                 font=("Arial", 11, "bold"), bg=BG_CARD, fg=TEXT_MAIN).pack(padx=6, pady=4)
+        self._attr_vars["DEXTERITY"].trace_add("write", self._recalc_initiative)
+        self._attr_vars["WITS"].trace_add("write",      self._recalc_initiative)
+        self._recalc_initiative()
 
-        # Movement
+        # Movement (auto-calculated from Dexterity)
         mov_f = card(ims)
         mov_f.pack(side="left", fill="both", expand=True, padx=2)
         tk.Label(mov_f, text="MOVEMENT", font=("Arial", 9, "bold"),
@@ -957,11 +1496,12 @@ class AberrantApp(tk.Tk):
             tk.Label(mov_inner, text=key, font=("Arial", 7),
                      bg=BG_CARD, fg=TEXT_DIM).pack(side="left", padx=2)
             v = tk.StringVar()
-            v.trace_add("write", lambda *_: self._mark_dirty())
             self._move_vars[key.lower()] = v
-            tk.Entry(mov_inner, textvariable=v, font=("Arial", 8),
-                     bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
-                     relief="flat", width=5).pack(side="left", padx=2, pady=4)
+            tk.Label(mov_inner, textvariable=v, font=("Arial", 9, "bold"),
+                     bg=BG_CARD, fg=TEXT_MAIN, width=4,
+                     anchor="center").pack(side="left", padx=2, pady=4)
+        self._attr_vars["DEXTERITY"].trace_add("write", self._recalc_movement)
+        self._recalc_movement()
 
         # Soak
         soak_f = card(ims)
@@ -981,34 +1521,7 @@ class AberrantApp(tk.Tk):
                      bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
                      relief="flat", width=6).pack(side="left", padx=2, pady=4)
 
-        # Description + Experience
-        de_frame = tk.Frame(inner, bg=BG_DARK)
-        de_frame.pack(fill="x", padx=4, pady=4)
-
-        section_label(de_frame, "DESCRIPTION")
-        desc_card = card(de_frame)
-        desc_card.pack(fill="x", pady=2)
-        self._desc_text = tk.Text(desc_card, font=("Arial", 8), height=6,
-                                  bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
-                                  relief="flat", wrap="word")
-        self._desc_text.pack(fill="both", padx=4, pady=4)
-        self._desc_text.bind("<<Modified>>", self._on_desc_change)
-
-        exp_row = tk.Frame(de_frame, bg=BG_DARK)
-        exp_row.pack(fill="x", pady=4)
-        tk.Label(exp_row, text="EXPERIENCE:", font=("Arial", 9, "bold"),
-                 bg=BG_DARK, fg=GOLD).pack(side="left", padx=4)
-        self._exp_var = tk.StringVar()
-        self._exp_var.trace_add("write", lambda *_: self._mark_dirty())
-        tk.Entry(exp_row, textvariable=self._exp_var, font=("Arial", 9),
-                 bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
-                 relief="flat", width=20).pack(side="left", padx=4)
-
         return sf
-
-    def _on_desc_change(self, e):
-        self._mark_dirty()
-        self._desc_text.edit_modified(False)
 
     # ── Health panel (right side) ─────────────────────────────────────────────
     # (label, default_penalty, default_count)
@@ -1123,12 +1636,9 @@ class AberrantApp(tk.Tk):
                 row = tk.Frame(inner, bg=BG_DARK)
                 row.pack(fill="x", padx=4, pady=1)
 
-                # State label only on first box of the state
-                lbl_text = state_label if box_idx == 0 else ""
-                tk.Label(row, text=lbl_text, font=("Arial", 8, "bold"),
+                tk.Label(row, text=state_label, font=("Arial", 8, "bold"),
                          bg=BG_DARK, fg=TEXT_MAIN, width=12, anchor="w").pack(side="left")
-                tk.Label(row, text=pen_str if box_idx == 0 else "",
-                         font=("Arial", 8, "bold"),
+                tk.Label(row, text=pen_str, font=("Arial", 8, "bold"),
                          bg=BG_DARK, fg=ACCENT, width=3, anchor="e").pack(side="left")
 
                 # Canvas: for Dead only red box; others orange + red
@@ -1192,8 +1702,8 @@ class AberrantApp(tk.Tk):
         # Hint
         hint = tk.Frame(inner, bg=BG_DARK)
         hint.pack(fill="x", padx=4, pady=(4, 2))
-        tk.Label(hint, text="Click=fill up  Right-click=toggle one  Shift=lethal col",
-                 font=("Arial", 7), bg=BG_DARK, fg=TEXT_DIM).pack(anchor="w")
+        tk.Label(hint, text="Click=fill up\nRight-click=toggle one\nShift=lethal col",
+                 font=("Arial", 7), bg=BG_DARK, fg=TEXT_DIM, justify="left").pack(anchor="w")
 
     def _health_fill_up_to(self, target_state, target_box_idx, col):
         """Fill all boxes in `col` from the very first state down to target_state/target_box_idx.
@@ -1764,11 +2274,29 @@ class AberrantApp(tk.Tk):
             self._dirty = True
             self._update_title()
 
-    def _update_title(self):
+    def get_tab_title(self):
         name = self._hdr_vars.get("birth_name", tk.StringVar()).get() or "Unnamed"
         dirty = " *" if self._dirty else ""
-        fname = f" — {os.path.basename(self._current_file)}" if self._current_file else ""
-        self.title(f"Aberrant — {name}{fname}{dirty}")
+        fname = f" [{os.path.basename(self._current_file)}]" if self._current_file else ""
+        return f"{name}{fname}{dirty}"
+
+    def _update_title(self):
+        if self._on_title_change:
+            self._on_title_change()
+
+    def can_close(self):
+        if not self._dirty:
+            return True
+        answer = messagebox.askyesnocancel(
+            "Unsaved changes",
+            f"'{self.get_tab_title()}' has unsaved changes.\nSave before closing?"
+        )
+        if answer is None:
+            return False
+        if answer:
+            self._save()
+            return not self._dirty
+        return True
 
     # ── Serialise / Deserialise ────────────────────────────────────────────────
     def _collect_char(self):
@@ -1782,9 +2310,26 @@ class AberrantApp(tk.Tk):
             sk: [[e[0], e[1].get()] for e in entries]
             for sk, entries in self._specialisations.items()
         }
-        c["custom_abilities"] = {k: [nv.get(), vv.get()]
-                                  for k, (nv, vv) in self._custom_ability_vars.items()}
-        c["backgrounds"] = {k: v.get() for k, v in self._bg_vars.items()}
+        c["custom_abilities"] = {
+            attr: [[nv.get(), vv.get()] for nv, vv, _ in entries if nv.get().strip()]
+            for attr, entries in self._custom_ability_vars.items()
+            if any(nv.get().strip() for nv, vv, _ in entries)
+        }
+        c["backgrounds"] = {
+            nv.get(): vv.get()
+            for nv, vv, _ in self._bg_rows
+            if nv.get().strip()
+        }
+        c["powers"] = [
+            {
+                "PowerID":   entry["power_id"],
+                "rating":    entry["rating_var"].get(),
+                "techniques": [
+                    spid for spid, bv in entry["tech_vars"].items() if bv.get()
+                ],
+            }
+            for entry in self._power_cards
+        ]
         c["mega_attributes"] = {ma: v.get() for ma, v in self._mega_vars.items()}
 
         c["willpower_perm"]  = self._wp_perm_var.get()
@@ -1803,20 +2348,17 @@ class AberrantApp(tk.Tk):
                                   for k, lst in getattr(self, "_health_leth", {}).items()}
         c["attacks"] = [{k: v.get() for k, v in row.items()} for row in self._attack_vars]
         c["armors"]  = [{k: v.get() for k, v in row.items()} for row in self._armor_vars]
-        c["initiative"]   = self._initiative_var.get()
-        c["walk"]         = self._move_vars["walk"].get()
-        c["run"]          = self._move_vars["run"].get()
-        c["sprint"]       = self._move_vars["sprint"].get()
         c["soak_bashing"] = self._soak_vars["bashing"].get()
         c["soak_lethal"]  = self._soak_vars["lethal"].get()
-        c["description"]  = self._desc_text.get("1.0", "end-1c")
-        c["experience"]   = self._exp_var.get()
+        c["game_notes"]   = self._notes_text.get("1.0", "end-1c")
         c["exp_total"]    = self._exp_total_var.get()
         c["exp_spent"]    = self._exp_spent_var.get()
         c["mega_enhancements"] = {
             ma: [[e[0], e[1].get()] for e in lst]
             for ma, lst in self._mega_enhancements.items()
         }
+        c["portrait"]    = self._portrait_b64
+        c["app_version"] = APP_VERSION
         return c
 
     def _apply_char(self, c):
@@ -1840,12 +2382,32 @@ class AberrantApp(tk.Tk):
         # Refresh all spec tag displays
         for sk, fn in getattr(self, "_spec_refresh_funcs", {}).items():
             fn()
-        for k, (nv, vv) in self._custom_ability_vars.items():
-            data = c.get("custom_abilities", {}).get(k, ["", 0])
-            nv.set(data[0])
-            vv.set(data[1])
-        for k, v in self._bg_vars.items():
-            v.set(c.get("backgrounds", {}).get(k, 0))
+        # Restore dynamic custom abilities
+        for attr, container in self._custom_ability_frames.items():
+            for w in container.winfo_children():
+                w.destroy()
+            self._custom_ability_vars[attr] = []
+        for attr, entries in c.get("custom_abilities", {}).items():
+            if attr in self._custom_ability_frames:
+                for item in entries:
+                    name = item[0] if item else ""
+                    val  = item[1] if len(item) > 1 else 0
+                    self._add_custom_ability(attr, name=name, val=val)
+        for w in self._bg_container.winfo_children():
+            w.destroy()
+        self._bg_rows = []
+        for bg_name, bg_val in c.get("backgrounds", {}).items():
+            self._add_background(name=bg_name, val=bg_val)
+        # Restore power cards
+        for entry in self._power_cards:
+            entry["frame"].destroy()
+        self._power_cards = []
+        for pw in c.get("powers", []):
+            self._add_power_card(
+                pw["PowerID"],
+                rating=pw.get("rating", 1),
+                techniques=pw.get("techniques", []),
+            )
         for ma, var in self._mega_vars.items():
             var.set(c.get("mega_attributes", {}).get(ma, 0))
 
@@ -1883,15 +2445,10 @@ class AberrantApp(tk.Tk):
             entry = arm[i] if i < len(arm) else {}
             for k, v in row.items():
                 v.set(entry.get(k, ""))
-        self._initiative_var.set(c.get("initiative", ""))
-        self._move_vars["walk"].set(c.get("walk", ""))
-        self._move_vars["run"].set(c.get("run", ""))
-        self._move_vars["sprint"].set(c.get("sprint", ""))
         self._soak_vars["bashing"].set(c.get("soak_bashing", ""))
         self._soak_vars["lethal"].set(c.get("soak_lethal", ""))
-        self._desc_text.delete("1.0", "end")
-        self._desc_text.insert("1.0", c.get("description", ""))
-        self._exp_var.set(c.get("experience", ""))
+        self._notes_text.delete("1.0", "end")
+        self._notes_text.insert("1.0", c.get("game_notes", ""))
         self._exp_total_var.set(c.get("exp_total", "0"))
         self._exp_spent_var.set(c.get("exp_spent", "0"))
         # Restore mega enhancements
@@ -1905,6 +2462,8 @@ class AberrantApp(tk.Tk):
             self._mega_enhancements[ma] = bvs
         for ma, fn in self._mega_enh_refresh.items():
             fn()
+        self._portrait_b64 = c.get("portrait", "")
+        self._refresh_portrait()
 
     def _load_char_to_ui(self):
         self._apply_char(self.char)
@@ -1912,32 +2471,16 @@ class AberrantApp(tk.Tk):
         self._update_title()
 
     # ── File operations ────────────────────────────────────────────────────────
-    def _new(self):
-        if self._dirty:
-            if not messagebox.askyesno("Unsaved changes",
-                                       "Discard unsaved changes and create a new character?"):
-                return
-        self.char = empty_character(self.cfg)
-        self._current_file = None
-        self._load_char_to_ui()
-
-    def _open(self):
-        if self._dirty:
-            if not messagebox.askyesno("Unsaved changes",
-                                       "Discard unsaved changes and open a file?"):
-                return
-        path = filedialog.askopenfilename(
-            title="Open Character",
-            filetypes=[("Aberrant character", "*.abe"), ("All files", "*.*")]
-        )
-        if not path:
-            return
+    def _open_file(self, path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            data, migrated = migrate_char(data)
             self.char = data
             self._current_file = path
             self._load_char_to_ui()
+            if migrated:
+                self._mark_dirty()
         except Exception as e:
             messagebox.showerror("Open Error", f"Could not open file:\n{e}")
 
@@ -1968,25 +2511,193 @@ class AberrantApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Save Error", f"Could not save file:\n{e}")
 
+
+# ─── Main Application Window ──────────────────────────────────────────────────
+class AberrantApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.cfg = load_config()
+        self.title("Aberrant Character Sheet")
+        self.configure(bg=BG_DARK)
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        win_w = self.cfg.get("window_width", 1300)
+        win_h = self.cfg.get("window_height", 900)
+        x = (sw - win_w) // 2
+        y = (sh - win_h) // 2
+        self.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        self.minsize(1100, 600)
+
+        self._build_menu()
+        self._build_notebook()
+        self._new_tab()
+        self.protocol("WM_DELETE_WINDOW", self._quit)
+
+    # ── Menu ──────────────────────────────────────────────────────────────────
+    def _build_menu(self):
+        mb = tk.Menu(self, bg=BG_MID, fg=TEXT_MAIN,
+                     activebackground=ACCENT, activeforeground="white",
+                     tearoff=False)
+        self.config(menu=mb)
+
+        file_menu = tk.Menu(mb, bg=BG_MID, fg=TEXT_MAIN,
+                            activebackground=ACCENT, activeforeground="white",
+                            tearoff=False)
+        mb.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="New Tab",   accelerator="Ctrl+N", command=self._new_tab)
+        file_menu.add_command(label="Open…",     accelerator="Ctrl+O", command=self._open_tab)
+        file_menu.add_separator()
+        file_menu.add_command(label="Save",      accelerator="Ctrl+S",
+                              command=lambda: self._active()._save() if self._active() else None)
+        file_menu.add_command(label="Save As…",  accelerator="Ctrl+Shift+S",
+                              command=lambda: self._active()._save_as() if self._active() else None)
+        file_menu.add_separator()
+        file_menu.add_command(label="Close Tab", accelerator="Ctrl+W", command=self._close_tab)
+        file_menu.add_separator()
+        file_menu.add_command(label="Quit",      accelerator="Ctrl+Q", command=self._quit)
+
+        settings_menu = tk.Menu(mb, bg=BG_MID, fg=TEXT_MAIN,
+                                activebackground=ACCENT, activeforeground="white",
+                                tearoff=False)
+        mb.add_cascade(label="Settings", menu=settings_menu)
+        settings_menu.add_command(label="Window Size…", command=self._open_settings)
+
+        about_menu = tk.Menu(mb, bg=BG_MID, fg=TEXT_MAIN,
+                             activebackground=ACCENT, activeforeground="white",
+                             tearoff=False)
+        mb.add_cascade(label="About", menu=about_menu)
+        about_menu.add_command(label="Help",    command=self._help)
+        about_menu.add_command(label="Version", command=self._version)
+
+        self.bind_all("<Control-n>", lambda e: self._new_tab())
+        self.bind_all("<Control-o>", lambda e: self._open_tab())
+        self.bind_all("<Control-s>", lambda e: self._active()._save() if self._active() else None)
+        self.bind_all("<Control-S>", lambda e: self._active()._save_as() if self._active() else None)
+        self.bind_all("<Control-w>", lambda e: self._close_tab())
+        self.bind_all("<Control-q>", lambda e: self._quit())
+
+    # ── Notebook ───────────────────────────────────────────────────────────────
+    def _build_notebook(self):
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("TNotebook",     background=BG_DARK, borderwidth=0)
+        style.configure("TNotebook.Tab", background=TAB_INACT, foreground=TEXT_MAIN,
+                        padding=[12, 4], font=("Arial", 9, "bold"))
+        style.map("TNotebook.Tab",
+                  background=[("selected", TAB_ACT)],
+                  foreground=[("selected", "white")])
+        self._notebook = ttk.Notebook(self)
+        self._notebook.pack(fill="both", expand=True, padx=4, pady=(2, 4))
+        self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _active(self):
+        tab_id = self._notebook.select()
+        return self._notebook.nametowidget(tab_id) if tab_id else None
+
+    def _new_tab(self):
+        frame = CharacterFrame(self._notebook, self.cfg,
+                               on_title_change=self._refresh_tab_titles)
+        self._notebook.add(frame, text=frame.get_tab_title())
+        self._notebook.select(frame)
+
+    def _open_tab(self):
+        path = filedialog.askopenfilename(
+            title="Open Character",
+            filetypes=[("Aberrant character", "*.abe"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        frame = CharacterFrame(self._notebook, self.cfg,
+                               on_title_change=self._refresh_tab_titles)
+        self._notebook.add(frame, text=frame.get_tab_title())
+        self._notebook.select(frame)
+        frame._open_file(path)
+
+    def _close_tab(self):
+        frame = self._active()
+        if not frame:
+            return
+        if not frame.can_close():
+            return
+        self._notebook.forget(frame)
+        frame.destroy()
+        if not self._notebook.tabs():
+            self._new_tab()
+
+    def _refresh_tab_titles(self):
+        for tab_id in self._notebook.tabs():
+            frame = self._notebook.nametowidget(tab_id)
+            self._notebook.tab(tab_id, text=frame.get_tab_title())
+        self._update_window_title()
+
+    def _update_window_title(self):
+        frame = self._active()
+        if frame and frame._current_file:
+            self.title(f"Aberrant — {os.path.basename(frame._current_file)}")
+        else:
+            self.title("Aberrant Character Sheet")
+
+    def _on_tab_changed(self, _event):
+        self._update_window_title()
+
     def _quit(self):
-        if self._dirty:
-            answer = messagebox.askyesnocancel(
-                "Unsaved changes",
-                "You have unsaved changes.\nSave before quitting?"
-            )
-            if answer is None:    # Cancel
+        for tab_id in list(self._notebook.tabs()):
+            frame = self._notebook.nametowidget(tab_id)
+            self._notebook.select(frame)
+            if not frame.can_close():
                 return
-            if answer:            # Yes → save first
-                self._save()
-                if self._dirty:   # Save was cancelled
-                    return
         self.destroy()
 
-    # ── About menu ─────────────────────────────────────────────────────────────
+    # ── Settings ───────────────────────────────────────────────────────────────
+    def _open_settings(self):
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Settings — Window Size")
+        win.geometry("280x160")
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="Window Resolution", font=("Arial", 11, "bold"),
+                 bg=BG_DARK, fg=ACCENT).pack(pady=(14, 6))
+
+        row = tk.Frame(win, bg=BG_DARK)
+        row.pack()
+        tk.Label(row, text="Width:", bg=BG_DARK, fg=TEXT_MAIN,
+                 font=("Arial", 9)).grid(row=0, column=0, padx=6, pady=4, sticky="e")
+        w_var = tk.IntVar(value=self.cfg.get("window_width", 1300))
+        tk.Spinbox(row, from_=800, to=7680, increment=10, textvariable=w_var,
+                   width=7, bg=BG_MID, fg=TEXT_MAIN, buttonbackground=BG_MID,
+                   font=("Arial", 9)).grid(row=0, column=1, padx=6)
+        tk.Label(row, text="Height:", bg=BG_DARK, fg=TEXT_MAIN,
+                 font=("Arial", 9)).grid(row=1, column=0, padx=6, pady=4, sticky="e")
+        h_var = tk.IntVar(value=self.cfg.get("window_height", 900))
+        tk.Spinbox(row, from_=600, to=4320, increment=10, textvariable=h_var,
+                   width=7, bg=BG_MID, fg=TEXT_MAIN, buttonbackground=BG_MID,
+                   font=("Arial", 9)).grid(row=1, column=1, padx=6)
+
+        def _apply():
+            try:
+                w, h = int(w_var.get()), int(h_var.get())
+            except (ValueError, tk.TclError):
+                messagebox.showerror("Invalid", "Width and height must be integers.", parent=win)
+                return
+            self.cfg["window_width"] = w
+            self.cfg["window_height"] = h
+            save_config(self.cfg)
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            self.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+            win.destroy()
+
+        tk.Button(win, text="Apply", command=_apply,
+                  bg=ACCENT, fg="white", relief="flat",
+                  font=("Arial", 9, "bold"), width=10).pack(pady=12)
+
+    # ── About ──────────────────────────────────────────────────────────────────
     def _help(self):
         win = tk.Toplevel(self, bg=BG_DARK)
         win.title("Help")
-        win.geometry("500x400")
+        win.geometry("500x420")
         win.resizable(False, False)
         tk.Label(win, text="ABERRANT CHARACTER SHEET — HELP",
                  font=("Arial", 12, "bold"), bg=BG_DARK, fg=ACCENT).pack(pady=12)
@@ -2005,6 +2716,10 @@ class AberrantApp(tk.Tk):
             "  Check boxes on the right to track wounds.\n\n"
             "QUANTUM POOL\n"
             "  Set Max and Current using the spinboxes, or click dots directly.\n\n"
+            "MULTIPLE CHARACTERS\n"
+            "  File → New Tab (Ctrl+N) opens a fresh character.\n"
+            "  File → Open (Ctrl+O) loads a file into a new tab.\n"
+            "  File → Close Tab (Ctrl+W) closes the current tab.\n\n"
             "FILES\n"
             "  Characters are saved as .abe files (JSON format).\n"
             "  Use File → Save / Save As to save your character.\n"

@@ -1,6 +1,8 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "app_name": "Aberrant Character Sheet",
+  "window_width": 1300,
+  "window_height": 900,
   "physical_attributes": [
     "STRENGTH",
     "DEXTERITY",

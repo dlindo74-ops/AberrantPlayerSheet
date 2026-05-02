@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile \"e:/CodeProject/Python/AberrantPlayerSheet/AberrantPlayerSheet/aberrant_sheet.py\")",
+      "Bash(python -m py_compile aberrant_sheet.py)",
+      "Bash(python3)"
+    ]
+  }
+}
