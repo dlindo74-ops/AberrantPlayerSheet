@@ -639,11 +639,21 @@ class CharacterFrame(tk.Frame):
         return sf
 
     def _show_power_picker(self, event=None):
-        added_ids = {e["power_id"] for e in self._power_cards}
-        available = [
-            p for p in self._all_powers
-            if p["PowerType"] != "Miscellaneous" and p["PowerID"] not in added_ids
-        ]
+        added_variant_sets: dict = {}
+        for e in self._power_cards:
+            added_variant_sets.setdefault(e["power_id"], set()).add(e.get("variant") or "")
+
+        def _is_available(p):
+            if p["PowerType"] == "Miscellaneous":
+                return False
+            pid = p["PowerID"]
+            variants = p.get("Variants")
+            if not variants:
+                return pid not in added_variant_sets
+            already = added_variant_sets.get(pid, set())
+            return not all(v in already for v in variants)
+
+        available = [p for p in self._all_powers if _is_available(p)]
         if not available:
             messagebox.showinfo("Powers", "All available powers have been added.")
             return
@@ -688,14 +698,66 @@ class CharacterFrame(tk.Frame):
             if not sel:
                 return
             pid = index_map.get(sel[0])
-            if pid:
-                win.destroy()
+            if not pid:
+                return
+            p = self._powers_by_id[pid]
+            win.destroy()
+            if p.get("Variants"):
+                self._show_variant_picker(p, on_chosen=lambda v: self._add_power_card(pid, variant=v))
+            else:
                 self._add_power_card(pid)
 
         lb.bind("<Double-Button-1>", lambda e: _confirm())
         tk.Button(win, text="Add", command=_confirm,
                   bg=ACCENT, fg="white", font=("Arial", 9, "bold"),
                   relief="flat", cursor="hand2").pack(pady=6)
+
+    def _show_variant_picker(self, power_data, on_chosen):
+        pid = power_data["PowerID"]
+        already_used = {e.get("variant") or "" for e in self._power_cards if e["power_id"] == pid}
+        remaining = [v for v in power_data["Variants"] if v not in already_used]
+        if not remaining:
+            return
+
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title(f"Choose — {power_data['PowerName']}")
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text=f"Choose the element for\n{power_data['PowerName']}:",
+                 font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT,
+                 justify="center").pack(pady=(12, 6), padx=16)
+
+        frm = tk.Frame(win, bg=BG_DARK)
+        frm.pack(padx=12, pady=(0, 4))
+        lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
+                        selectforeground="white", font=("Arial", 10), activestyle="none",
+                        relief="flat", width=22, height=len(remaining))
+        lb.pack()
+        for v in remaining:
+            lb.insert("end", f"  {v}")
+        lb.selection_set(0)
+
+        def _confirm():
+            sel = lb.curselection()
+            if not sel:
+                return
+            chosen = remaining[sel[0]]
+            win.destroy()
+            on_chosen(chosen)
+
+        lb.bind("<Double-Button-1>", lambda e: _confirm())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(4, 12))
+        tk.Button(btn_row, text="Choose", command=_confirm, bg=ACCENT, fg="white",
+                  font=("Arial", 9, "bold"), relief="flat", padx=12).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", command=win.destroy, bg=BG_MID, fg=TEXT_MAIN,
+                  font=("Arial", 9), relief="flat", padx=12).pack(side="left", padx=4)
+
+        win.update_idletasks()
+        win.geometry(f"260x{win.winfo_reqheight()}")
 
     def _add_cost_row(self, parent, power_data, bg, prof_var=None):
         """Add a Cost: line. prof_var makes it live (learned = level, unlearned = 2×level)."""
@@ -781,7 +843,7 @@ class CharacterFrame(tk.Frame):
                  bg=bg, fg=TEXT_MAIN, anchor="w",
                  wraplength=220, justify="left").pack(side="left")
 
-    def _add_power_card(self, power_id, rating=1, techniques=None, extras_bought=None):
+    def _add_power_card(self, power_id, rating=1, techniques=None, extras_bought=None, variant=None):
         if techniques is None:
             techniques = []
         if extras_bought is None:
@@ -798,7 +860,9 @@ class CharacterFrame(tk.Frame):
 
         hdr = tk.Frame(outer, bg=BG_PANEL)
         hdr.pack(fill="x")
-        tk.Label(hdr, text=p["PowerName"], font=("Arial", 10, "bold"),
+        _tmpl = p.get("VariantNameTemplate", "")
+        display_name = _tmpl.format(variant=variant) if (_tmpl and variant) else p["PowerName"]
+        tk.Label(hdr, text=display_name, font=("Arial", 10, "bold"),
                  bg=BG_PANEL, fg=GOLD, anchor="w").pack(side="left", padx=6, pady=4)
         x_lbl = tk.Label(hdr, text="×", font=("Arial", 10, "bold"),
                          bg=BG_PANEL, fg=TEXT_DIM, cursor="hand2")
@@ -855,32 +919,78 @@ class CharacterFrame(tk.Frame):
                          bg=BG_CARD, fg=TEXT_MAIN, anchor="w",
                          wraplength=200, justify="left").pack(side="left", fill="x", expand=True)
 
-        desc_text = format_description(p.get("Description", ""))
-        if desc_text:
-            _add_description_widget(outer, desc_text)
-
         extras_str = str(p.get("Extras", "")).strip()
         extra_list = [e.strip() for e in extras_str.split(";")
                       if e.strip() and e.strip().lower() not in ("none", "n/a")]
-        extra_vars = {}
+        extra_vars = {n: tk.BooleanVar(value=(n in extras_bought)) for n in extra_list}
+
         if extra_list:
-            ext_hdr = tk.Frame(outer, bg=BG_MID)
-            ext_hdr.pack(fill="x", pady=(4, 0))
-            tk.Label(ext_hdr, text="EXTRAS", font=("Arial", 8, "bold"),
-                     bg=BG_MID, fg=ACCENT).pack(side="left", padx=6, pady=2)
-            ext_body = tk.Frame(outer, bg=BG_CARD)
-            ext_body.pack(fill="x", padx=6, pady=(2, 4))
-            for extra_name in extra_list:
-                bought = extra_name in extras_bought
-                bv = tk.BooleanVar(value=bought)
-                bv.trace_add("write", lambda *_: self._mark_dirty())
-                ext_row = tk.Frame(ext_body, bg=BG_CARD)
-                ext_row.pack(fill="x", pady=1)
-                CheckBox(ext_row, var=bv, bg=BG_CARD).pack(side="left", padx=(0, 4))
-                tk.Label(ext_row, text=extra_name, font=("Arial", 8),
-                         bg=BG_CARD, fg=TEXT_MAIN, anchor="w",
-                         wraplength=220, justify="left").pack(side="left", fill="x", expand=True)
-                extra_vars[extra_name] = bv
+            extras_row = tk.Frame(stats_frame, bg=BG_CARD)
+            extras_row.pack(fill="x", pady=0)
+            tk.Label(extras_row, text="Extras:", font=("Arial", 8, "bold"),
+                     bg=BG_CARD, fg=TEXT_DIM, width=13, anchor="w").pack(side="left")
+            extras_inner = tk.Frame(extras_row, bg=BG_CARD)
+            extras_inner.pack(side="left", fill="x", expand=True)
+
+            def _refresh_extras():
+                for w in extras_inner.winfo_children():
+                    w.destroy()
+                bought_names   = [n for n in extra_list if extra_vars[n].get()]
+                unbought_names = [n for n in extra_list if not extra_vars[n].get()]
+                if bought_names:
+                    tk.Label(extras_inner, text=", ".join(bought_names),
+                             font=("Arial", 8), bg=BG_CARD, fg=TEXT_MAIN,
+                             anchor="w", wraplength=160, justify="left").pack(side="left")
+                if unbought_names:
+                    def _do_add():
+                        avail = [n for n in extra_list if not extra_vars[n].get()]
+                        if not avail:
+                            return
+                        if len(avail) == 1:
+                            extra_vars[avail[0]].set(True)
+                            self._mark_dirty()
+                            _refresh_extras()
+                        else:
+                            m = tk.Menu(outer, tearoff=False, bg=BG_MID, fg=TEXT_MAIN,
+                                        activebackground=ACCENT, activeforeground="white")
+                            for n in avail:
+                                def _cmd(name=n):
+                                    extra_vars[name].set(True)
+                                    self._mark_dirty()
+                                    _refresh_extras()
+                                m.add_command(label=n, command=_cmd)
+                            m.post(self.winfo_pointerx(), self.winfo_pointery())
+                    tk.Button(extras_inner, text="+", font=("Arial", 8, "bold"),
+                              bg=BG_MID, fg=ACCENT, relief="flat", cursor="hand2",
+                              command=_do_add).pack(side="left", padx=(4, 0))
+                if bought_names:
+                    def _do_remove():
+                        active = [n for n in extra_list if extra_vars[n].get()]
+                        if not active:
+                            return
+                        if len(active) == 1:
+                            extra_vars[active[0]].set(False)
+                            self._mark_dirty()
+                            _refresh_extras()
+                        else:
+                            m = tk.Menu(outer, tearoff=False, bg=BG_MID, fg=TEXT_MAIN,
+                                        activebackground=ACCENT, activeforeground="white")
+                            for n in active:
+                                def _cmd(name=n):
+                                    extra_vars[name].set(False)
+                                    self._mark_dirty()
+                                    _refresh_extras()
+                                m.add_command(label=n, command=_cmd)
+                            m.post(self.winfo_pointerx(), self.winfo_pointery())
+                    tk.Button(extras_inner, text="−", font=("Arial", 8, "bold"),
+                              bg=BG_MID, fg=TEXT_DIM, relief="flat", cursor="hand2",
+                              command=_do_remove).pack(side="left", padx=(2, 0))
+
+            _refresh_extras()
+
+        desc_text = format_description(p.get("Description", ""))
+        if desc_text:
+            _add_description_widget(outer, desc_text)
 
         tech_vars = {}
         if p["PowerType"] == "Mastery":
@@ -896,6 +1006,7 @@ class CharacterFrame(tk.Frame):
 
         entry = {
             "power_id":   power_id,
+            "variant":    variant,
             "rating_var": rating_var,
             "tech_vars":  tech_vars,
             "extra_vars": extra_vars,
@@ -2014,6 +2125,7 @@ class CharacterFrame(tk.Frame):
                 "extras": [
                     name for name, bv in entry.get("extra_vars", {}).items() if bv.get()
                 ],
+                **({"variant": entry["variant"]} if entry.get("variant") else {}),
             }
             for entry in self._power_cards
         ]
@@ -2091,6 +2203,7 @@ class CharacterFrame(tk.Frame):
                 rating=pw.get("rating", 1),
                 techniques=pw.get("techniques", []),
                 extras_bought=pw.get("extras", []),
+                variant=pw.get("variant"),
             )
         for ma, var in self._mega_vars.items():
             var.set(c.get("mega_attributes", {}).get(ma, 0))

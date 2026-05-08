@@ -1,6 +1,6 @@
 import os
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aberrant_config.json")
 POWERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "powers.json")
 

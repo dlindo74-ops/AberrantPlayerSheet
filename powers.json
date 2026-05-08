@@ -968,7 +968,9 @@
           "ResolveOrder": 8
         }
       ],
-      "FlightPower": true
+      "FlightPower": true,
+      "Variants": ["Fire", "Water", "Earth", "Wind"],
+      "VariantNameTemplate": "{variant} Anima"
     },
     {
       "PowerID": "PWR049",
@@ -1076,7 +1078,9 @@
       ],
       "Description": "Elemental Mastery is similar to, but transcends, Elemental Anima. Whereas Elemental Anima allows a nova to manipulate an existing element, Elemental Mastery allows him actually to create that element or phenomenon, thus greatly expanding the range of his elemental abilities.\n\nLike Elemental Anima, Elemental Mastery provides a list of techniques, and characters may master one technique per dot in Elemental Mastery. Characters may attempt to use techniques they haven't mastered, but the players must pay double cost and roll against a difficulty penalty of one. The techniques chosen should be appropriate to the element being generated.\n\nCharacters may choose from the techniques listed here or make up their own, with the Storyteller's permission and approval.",
       "Extras": "None",
-      "FlightPower": false
+      "FlightPower": false,
+      "Variants": ["Fire", "Water", "Earth", "Wind"],
+      "VariantNameTemplate": "{variant} Mastery"
     },
     {
       "PowerID": "PWR050",

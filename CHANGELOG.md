@@ -5,6 +5,19 @@ Format: version — date — description
 
 ---
 
+## [1.2.0] — 2026-05-07
+### Added
+- **Power variant selection** — powers that require a sub-type (e.g. Elemental Anima, Elemental Mastery) now open a second "Choose element" dialog after selection; card is retitled to reflect the choice (e.g. "Fire Anima", "Water Mastery"); a character may hold the same base power multiple times with different variants as fully independent cards; cancelling the variant dialog adds nothing
+- `Variants` and `VariantNameTemplate` fields added to PWR048 (Elemental Anima) and PWR049 (Elemental Mastery) in `powers.json`; structure is generic — any future power can be made variant-enabled by adding the same two fields
+### Changed
+- **Power extras — inline stat row** — "Extras:" is now a standard stat row in the power card alongside Range/Area/Duration/Effect, showing bought extras as comma-separated text with `+` / `−` buttons; `+` hidden when all extras are purchased; `−` hidden when none are bought; powers with multiple extras use a popup menu to choose which to add or remove
+- **Power card font sizes** — text labels in power cards increased by 1 pt for improved readability
+- **Health panel legend** — "Bashing" and "Lethal" labels are now right-aligned in the health track header
+### Refactored
+- `aberrant_sheet.py` (~2 774 lines) split into focused modules: `constants.py` (colour palette, file paths, version), `data_loader.py` (JSON I/O, migration, empty-character factory), `ui_widgets.py` (DotRow, CheckBox, ScrollFrame, helpers), `character_frame.py` (full CharacterFrame class), `app.py` (AberrantApp window/menu/notebook); `aberrant_sheet.py` is now a 4-line entry point
+
+---
+
 ## [1.1.0] — 2026-05-02
 ### Added
 - **FlightPower field** in `powers.json` — boolean added to every power; `true` for Flight, Elemental Anima, Gravity Control, Magnetic Mastery, Weather Manipulation
