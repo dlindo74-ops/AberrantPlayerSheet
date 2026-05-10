@@ -5,6 +5,42 @@ Format: version — date — description
 
 ---
 
+## [1.4.0] — 2026-05-08
+### Changed
+- **Full attribute resolution in expressions** — `_resolve_stat_rich` replaces the old `_resolve_stat_text`; all nine standard attributes (Strength, Dexterity, Stamina, Perception, Intelligence, Wits, Appearance, Manipulation, Charisma) are now recognised as tokens inside `(…)` and `[…]` expression groups and substituted with the character's current attribute values, live-updating whenever the attribute dots change
+- **Mega-attribute dice in expressions** — when an expression group references an attribute that has a Mega version (e.g. Mega-Stamina), the mega-attribute rating is shown in red next to the resolved base count, e.g. `7 (2)` where 2 is the current Mega-Stamina dots; updates live when the mega-attribute changes
+- **Dice count styled in green with underline** — every resolved numeric result from an expression is now displayed in green (`#00cc44`) with an underline; surrounding non-expression text remains the default cream colour
+- **Hover cursor on dice numbers** — moving the mouse over a resolved dice count changes the cursor to a hand (pointer), preparing the groundwork for a future dice roller
+- **Arithmetic merge across groups** — when two expression groups are connected by an operator (e.g. `[Quantum x 3] + (power rating x 4)`), the groups are evaluated separately then the outer arithmetic collapses them into one green number (e.g. 24); similarly `(expr) x 50` folds into a single result
+- Applies to stat fields (Range, Area, Duration, Effect) and scrollable description text in both regular power cards and Mastery technique sub-boxes
+
+---
+
+## [1.3.0] — 2026-05-08
+### Added
+- **Power variant selection — 6 more powers** — powers that require a choice at purchase now open a variant picker dialog; the card title reflects the chosen option:
+  - *Absorption* (PWR009) — Energy or Kinetic; a character may hold both as separate cards
+  - *Bodymorph* (PWR012) — preset forms (Stone, Metal, Liquid, Gas, Fire, Electricity, Ice, Plasma) plus a **Custom…** free-text entry; can be taken any number of times with different forms
+  - *Boost* (PWR013) — the 9 core Attributes (Strength, Dexterity, Stamina, Perception, Intelligence, Wits, Appearance, Manipulation, Charisma); each Attribute can only be boosted once
+  - *Holo* (PWR023) — one of the 5 senses (Sight, Hearing, Touch, Taste, Smell)
+  - *Hypermovement* (PWR024) — Running, Swimming, or Flight
+  - *Density Control* (PWR014) — Increase, Decrease, or Both Modes (representing the Full Control extra purchased at power acquisition)
+- **`AllowCustomVariant` flag** in `powers.json` — powers with this flag are always available in the picker (never exhausted) and display a live text-entry field when "Custom…" is selected; currently used by Bodymorph
+- **Body Modifications section** — dedicated "BODY MODIFICATIONS" section below the Quantum Powers grid with a separate **+ Add Body Modification** button in the tab header; picker lists all 9 book modifications with cost and description preview, plus a "Custom…" option; modifications are displayed as compact removable cards; any modification may be taken multiple times; saved to character file as `body_modifications` list
+- **Aberrations section** — replaces the old free-text entry with a structured picker and card list; picker groups all aberrations by taint threshold (Low 4–5, Medium 6–7, High 8+, Mental Disorders) in a scrollable list with non-selectable group headers; selecting an entry shows its description; "Custom…" option available; aberrations displayed as compact removable cards; saved as `aberrations` list; old string-format saves are migrated automatically on load
+- `Modifications` array added to PWR065 (Body Modification) in `powers.json` — 9 entries each with id, name, cost, and description
+- `aberrations` data added to `aberrant_config.json` — 24 physical aberrations across 3 taint tiers plus 6 mental disorders, each with name and description
+### Changed
+- `_show_variant_picker` rewritten to support `AllowCustomVariant` — inline custom-entry frame appears/hides based on listbox selection; window auto-resizes; `<Return>` in the entry confirms; empty custom name refocuses the field
+- **Health panel — Incapacitated/Dead penalty hidden** — the penalty column no longer shows a value next to Incapacitated or Dead health states; all other states are unaffected
+- **Live stat field resolution** — stat fields (Range, Area, Duration, Effect) and the scrollable description text in power cards and technique sub-boxes that contain expressions like `(power rating x 4) + 40`, `(Quantum + power rating) meters`, or `(Quantum + Flight) x 50` are now evaluated and shown as computed numbers; the power's own name (e.g. "Flight", "Quantum Bolt") is treated as an alias for the power rating inside expressions; values update live when the power rating dots or the character's Quantum attribute change; only tokens inside `(…)` or `[…]` are substituted — bare mentions of "Quantum" outside parentheses (e.g. "costs 1 Quantum point") are left unchanged; powers with no expressions are unaffected
+- **Power card column balancing** — new power cards are placed in whichever column is shorter (by pixel height) rather than strictly alternating left/right; cards of unequal height no longer cause one column to grow significantly taller than the other
+### Migration
+- `body_modifications` key added to new character template and migration guard; old saves without the key load cleanly
+- `aberrations` migrated from string to list; non-empty old text is preserved as a single entry
+
+---
+
 ## [1.2.0] — 2026-05-07
 ### Added
 - **Power variant selection** — powers that require a sub-type (e.g. Elemental Anima, Elemental Mastery) now open a second "Choose element" dialog after selection; card is retitled to reflect the choice (e.g. "Fire Anima", "Water Mastery"); a character may hold the same base power multiple times with different variants as fully independent cards; cancelling the variant dialog adds nothing

@@ -126,3 +126,4 @@ def _add_description_widget(parent, text):
     tw.config(state="disabled")
     tw.pack(side="left", fill="x", expand=True)
     sb.config(command=tw.yview)
+    return tw

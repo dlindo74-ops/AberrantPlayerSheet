@@ -20,6 +20,195 @@ from ui_widgets import (DotRow, CheckBox, ScrollFrame,
                         section_label, card, _add_description_widget)
 
 
+_DICE_COLOR = "#00cc44"
+_MEGA_COLOR = "#cc3333"
+
+# Matches any standard attribute or "power rating" / "Quantum" keyword
+_ATTR_KW_RE = re.compile(
+    r'\b(?:power\s+rating|quantum|strength|dexterity|stamina|perception|'
+    r'intelligence|wits|appearance|manipulation|charisma)\b',
+    re.IGNORECASE,
+)
+
+
+def _has_expr(text, power_name=None):
+    """Return True when text has a (…) or […] group with a resolvable token."""
+    for m in re.finditer(r'\(([^()]*)\)|\[([^\[\]]*)\]', text):
+        inner = m.group(1) if m.group(1) is not None else m.group(2)
+        if _ATTR_KW_RE.search(inner):
+            return True
+        if power_name and re.search(r'\b' + re.escape(power_name) + r'\b',
+                                    inner, re.IGNORECASE):
+            return True
+    return False
+
+
+def _resolve_stat_rich(text, rating, quantum, power_name=None,
+                       attr_vars=None, mega_vars=None):
+    """Evaluate (…) / […] expressions; return list of (segment_text, tag).
+    tag ∈ {'normal', 'dice', 'mega'}.
+    'dice' = resolved number shown in green+underline (clickable future dice roller).
+    'mega' = mega-attribute addendum shown in red, not underlined.
+    attr_vars  — dict  UPPERCASE_NAME → tk.IntVar   (all standard attributes)
+    mega_vars  — dict "Mega-Name"    → tk.IntVar   (mega-attribute dots)
+    """
+    attr_vars = attr_vars or {}
+    mega_vars = mega_vars or {}
+
+    # Build value lookup: lowercase key → current int value
+    lookup = {"power rating": rating, "quantum": quantum}
+    if power_name:
+        lookup[power_name.lower()] = rating
+    for k, v in attr_vars.items():
+        lookup[k.lower()] = v.get()
+
+    def _has_token(inner):
+        il = inner.lower()
+        for k in lookup:
+            if k == "power rating":
+                if re.search(r'power\s+rating', il):
+                    return True
+            elif re.search(r'\b' + re.escape(k) + r'\b', il):
+                return True
+        return False
+
+    def _eval_inner(inner):
+        """Substitute tokens, evaluate; return (num_str, mega_total) or (None, 0)."""
+        mega_total = 0
+        for mk, mv in mega_vars.items():
+            base = mk[5:].lower()           # "Mega-Stamina" → "stamina"
+            if re.search(r'\b' + re.escape(base) + r'\b', inner.lower()):
+                mega_total += mv.get()
+        ev = inner
+        for k in sorted(lookup, key=len, reverse=True):
+            vs = str(lookup[k])
+            if k == "power rating":
+                ev = re.sub(r'power\s+rating', vs, ev, flags=re.IGNORECASE)
+            else:
+                ev = re.sub(r'\b' + re.escape(k) + r'\b', vs, ev, flags=re.IGNORECASE)
+        ev = re.sub(r'\s*[xX×]\s*', ' * ', ev)
+        try:
+            result = eval(ev)
+            if isinstance(result, float) and result.is_integer():
+                result = int(result)
+            return str(result), mega_total
+        except Exception:
+            return None, 0
+
+    # Phase 1 — tokenise text into segments
+    segs = []       # each entry is [tag, text], mutable for phase 2
+    prev = 0
+    for m in re.finditer(r'\(([^()]*)\)|\[([^\[\]]*)\]', text):
+        inner = m.group(1) if m.group(1) is not None else m.group(2)
+        if m.start() > prev:
+            segs.append(["normal", text[prev:m.start()]])
+        if _has_token(inner):
+            num_str, mega = _eval_inner(inner)
+            if num_str is not None:
+                segs.append(["dice", num_str])
+                if mega > 0:
+                    segs.append(["mega", f" ({mega})"])
+            else:
+                segs.append(["normal", m.group(0)])
+        else:
+            segs.append(["normal", m.group(0)])
+        prev = m.end()
+    if prev < len(text):
+        segs.append(["normal", text[prev:]])
+
+    # Phase 2 — merge a dice segment with any immediately-following arithmetic
+    # so  ("12", dice) + (" + 40 km", normal) → ("52", dice) + (" km", normal)
+    # and ("7",  dice) + (" + ",      normal) + ("12", dice) → ("19", dice)
+    changed = True
+    while changed:
+        changed = False
+        out = []
+        i = 0
+        while i < len(segs):
+            tag, val = segs[i]
+            if tag != "dice":
+                out.append([tag, val])
+                i += 1
+                continue
+            j, cur = i + 1, val
+            while j < len(segs):
+                nt, nv = segs[j]
+                if nt == "mega":
+                    break
+                if nt == "normal":
+                    # Case A: " op N…" immediately at start of next normal segment
+                    ma = re.match(
+                        r'^(\s*[+\-]\s*\d+(?:\.\d+)?|\s*[xX×*\/]\s*\d+(?:\.\d+)?)',
+                        nv)
+                    if ma:
+                        arith = re.sub(r'[xX×]', '*', ma.group(1))
+                        try:
+                            nval = eval(cur + arith)
+                            if isinstance(nval, float) and nval.is_integer():
+                                nval = int(nval)
+                            cur = str(nval)
+                            rest = nv[len(ma.group(1)):]
+                            if rest:
+                                segs[j] = ["normal", rest]
+                            else:
+                                j += 1
+                            changed = True
+                            continue
+                        except Exception:
+                            pass
+                    # Case B: pure operator segment + next dice segment
+                    mb = re.match(r'^(\s*[+\-]\s*|\s*[xX×*\/]\s*)$', nv)
+                    if mb and j + 1 < len(segs) and segs[j + 1][0] == "dice":
+                        op = re.sub(r'[xX×]', '*', mb.group(1))
+                        try:
+                            nval = eval(cur + op + segs[j + 1][1])
+                            if isinstance(nval, float) and nval.is_integer():
+                                nval = int(nval)
+                            cur = str(nval)
+                            j += 2
+                            changed = True
+                            continue
+                        except Exception:
+                            pass
+                    break
+                break
+            out.append(["dice", cur])
+            if j < len(segs) and segs[j][0] == "mega":   # carry trailing mega tag
+                out.append(segs[j])
+                j += 1
+            i = j
+        segs = out
+
+    return [(val, tag) for tag, val in segs]
+
+
+def _find_expr_attr_vars(text, attr_vars, mega_vars):
+    """Return IntVars for attributes (+ their mega versions) referenced inside
+    (…) or […] groups in text.  Used to set up live-update traces."""
+    result, seen = [], set()
+    for m in re.finditer(r'\(([^()]*)\)|\[([^\[\]]*)\]', text):
+        inner = (m.group(1) if m.group(1) is not None else m.group(2)).lower()
+        for k, v in attr_vars.items():
+            kl = k.lower()
+            if kl in seen:
+                continue
+            if re.search(r'\b' + re.escape(kl) + r'\b', inner, re.IGNORECASE):
+                result.append(v)
+                seen.add(kl)
+                mega_key = "Mega-" + k.capitalize()
+                if mega_key in mega_vars:
+                    result.append(mega_vars[mega_key])
+    return result
+
+
+def _configure_dice_tags(tw):
+    """Configure 'dice' (green, underline, hand cursor) and 'mega' (red) tags."""
+    tw.tag_configure("dice", foreground=_DICE_COLOR, underline=True)
+    tw.tag_configure("mega", foreground=_MEGA_COLOR)
+    tw.tag_bind("dice", "<Enter>", lambda e: tw.config(cursor="hand2"))
+    tw.tag_bind("dice", "<Leave>", lambda e: tw.config(cursor=""))
+
+
 # ─── Character Sheet Frame ────────────────────────────────────────────────────
 class CharacterFrame(tk.Frame):
     def __init__(self, parent, cfg, on_title_change=None):
@@ -511,14 +700,16 @@ class CharacterFrame(tk.Frame):
         self._taint_temp_var.trace_add("write", lambda *_: self._mark_dirty())
         self._build_dot_checks(t2, 10, self._taint_temp_var)
 
-        section_label(col0, "ABERRATIONS")
-        aber_frame = card(col0)
-        aber_frame.pack(fill="x", pady=2, padx=2)
-        self._aberr_var = tk.StringVar()
-        self._aberr_var.trace_add("write", lambda *_: self._mark_dirty())
-        tk.Entry(aber_frame, textvariable=self._aberr_var,
-                 font=("Arial", 8), bg=BG_MID, fg=TEXT_MAIN,
-                 insertbackground=TEXT_MAIN, relief="flat").pack(fill="x", padx=4, pady=3)
+        aber_hdr = tk.Frame(col0, bg=BG_DARK)
+        aber_hdr.pack(fill="x", pady=(6, 0))
+        section_label(aber_hdr, "ABERRATIONS")
+        aber_add_btn = tk.Label(aber_hdr, text="+ Add",
+                                font=("Arial", 8, "bold"), bg=BG_DARK, fg=ACCENT, cursor="hand2")
+        aber_add_btn.pack(side="right", padx=6)
+        aber_add_btn.bind("<Button-1>", self._show_aberration_picker)
+        self._aberration_container = tk.Frame(col0, bg=BG_DARK)
+        self._aberration_container.pack(fill="x", padx=2)
+        self._aberration_cards = []
 
         section_label(col0, "QUANTUM")
         qf = card(col0)
@@ -625,6 +816,10 @@ class CharacterFrame(tk.Frame):
                            font=("Arial", 8, "bold"), bg=BG_DARK, fg=ACCENT, cursor="hand2")
         add_btn.pack(side="right", padx=8)
         add_btn.bind("<Button-1>", self._show_power_picker)
+        mod_btn = tk.Label(top, text="+ Add Body Modification",
+                           font=("Arial", 8, "bold"), bg=BG_DARK, fg=ACCENT, cursor="hand2")
+        mod_btn.pack(side="right", padx=4)
+        mod_btn.bind("<Button-1>", self._show_body_mod_picker)
 
         grid = tk.Frame(inner, bg=BG_DARK)
         grid.pack(fill="both", expand=True, padx=4, pady=4)
@@ -636,6 +831,14 @@ class CharacterFrame(tk.Frame):
         self._powers_col_right.grid(row=0, column=1, sticky="nsew", padx=2)
 
         self._power_cards = []
+
+        mod_section = tk.Frame(inner, bg=BG_DARK)
+        mod_section.pack(fill="x", padx=4, pady=(8, 4))
+        section_label(mod_section, "BODY MODIFICATIONS")
+        self._body_mod_container = tk.Frame(inner, bg=BG_DARK)
+        self._body_mod_container.pack(fill="x", padx=4, pady=(0, 4))
+        self._body_mod_cards = []
+
         return sf
 
     def _show_power_picker(self, event=None):
@@ -647,6 +850,8 @@ class CharacterFrame(tk.Frame):
             if p["PowerType"] == "Miscellaneous":
                 return False
             pid = p["PowerID"]
+            if p.get("AllowCustomVariant"):
+                return True
             variants = p.get("Variants")
             if not variants:
                 return pid not in added_variant_sets
@@ -702,7 +907,7 @@ class CharacterFrame(tk.Frame):
                 return
             p = self._powers_by_id[pid]
             win.destroy()
-            if p.get("Variants"):
+            if p.get("Variants") or p.get("AllowCustomVariant"):
                 self._show_variant_picker(p, on_chosen=lambda v: self._add_power_card(pid, variant=v))
             else:
                 self._add_power_card(pid)
@@ -715,16 +920,22 @@ class CharacterFrame(tk.Frame):
     def _show_variant_picker(self, power_data, on_chosen):
         pid = power_data["PowerID"]
         already_used = {e.get("variant") or "" for e in self._power_cards if e["power_id"] == pid}
-        remaining = [v for v in power_data["Variants"] if v not in already_used]
-        if not remaining:
+        remaining = [v for v in power_data.get("Variants", []) if v not in already_used]
+        allow_custom = power_data.get("AllowCustomVariant", False)
+
+        if not remaining and not allow_custom:
             return
+
+        display_items = list(remaining)
+        if allow_custom:
+            display_items.append("Custom…")
 
         win = tk.Toplevel(self, bg=BG_DARK)
         win.title(f"Choose — {power_data['PowerName']}")
         win.resizable(False, False)
         win.grab_set()
 
-        tk.Label(win, text=f"Choose the element for\n{power_data['PowerName']}:",
+        tk.Label(win, text=f"Choose the form for\n{power_data['PowerName']}:",
                  font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT,
                  justify="center").pack(pady=(12, 6), padx=16)
 
@@ -732,21 +943,50 @@ class CharacterFrame(tk.Frame):
         frm.pack(padx=12, pady=(0, 4))
         lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
                         selectforeground="white", font=("Arial", 10), activestyle="none",
-                        relief="flat", width=22, height=len(remaining))
+                        relief="flat", width=22, height=min(len(display_items), 12))
         lb.pack()
-        for v in remaining:
+        for v in display_items:
             lb.insert("end", f"  {v}")
         lb.selection_set(0)
+
+        custom_frame = tk.Frame(win, bg=BG_DARK)
+        tk.Label(custom_frame, text="Form name:", font=("Arial", 8),
+                 bg=BG_DARK, fg=TEXT_DIM).pack(side="left")
+        custom_var = tk.StringVar()
+        custom_entry = tk.Entry(custom_frame, textvariable=custom_var, font=("Arial", 9),
+                                bg=BG_CARD, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                                relief="flat", width=16)
+        custom_entry.pack(side="left", padx=(4, 0))
+
+        def _sync_custom(*_):
+            sel = lb.curselection()
+            is_custom = bool(sel) and display_items[sel[0]] == "Custom…"
+            if is_custom:
+                custom_frame.pack(padx=12, pady=(2, 0), fill="x")
+                custom_entry.focus_set()
+            else:
+                custom_frame.pack_forget()
+            win.update_idletasks()
+            win.geometry(f"260x{win.winfo_reqheight()}")
+
+        lb.bind("<<ListboxSelect>>", _sync_custom)
 
         def _confirm():
             sel = lb.curselection()
             if not sel:
                 return
-            chosen = remaining[sel[0]]
+            if display_items[sel[0]] == "Custom…":
+                chosen = custom_var.get().strip()
+                if not chosen:
+                    custom_entry.focus_set()
+                    return
+            else:
+                chosen = display_items[sel[0]]
             win.destroy()
             on_chosen(chosen)
 
         lb.bind("<Double-Button-1>", lambda e: _confirm())
+        custom_entry.bind("<Return>", lambda e: _confirm())
         win.bind("<Escape>", lambda e: win.destroy())
 
         btn_row = tk.Frame(win, bg=BG_DARK)
@@ -843,6 +1083,259 @@ class CharacterFrame(tk.Frame):
                  bg=bg, fg=TEXT_MAIN, anchor="w",
                  wraplength=220, justify="left").pack(side="left")
 
+    def _show_body_mod_picker(self, event=None):
+        bm_power = next((p for p in self._all_powers if p["PowerID"] == "PWR065"), None)
+        mods = bm_power.get("Modifications", []) if bm_power else []
+        display_items = [m["name"] for m in mods] + ["Custom…"]
+
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Add Body Modification")
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="Choose a Body Modification:",
+                 font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT).pack(pady=(12, 6), padx=16)
+
+        frm = tk.Frame(win, bg=BG_DARK)
+        frm.pack(padx=12, pady=(0, 4))
+        lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
+                        selectforeground="white", font=("Arial", 10), activestyle="none",
+                        relief="flat", width=26, height=min(len(display_items), 12))
+        lb.pack()
+        for v in display_items:
+            lb.insert("end", f"  {v}")
+        lb.selection_set(0)
+
+        desc_var = tk.StringVar()
+        tk.Label(win, textvariable=desc_var, font=("Arial", 8), bg=BG_DARK, fg=TEXT_DIM,
+                 wraplength=220, justify="left").pack(padx=12, pady=(0, 4), fill="x")
+
+        custom_frame = tk.Frame(win, bg=BG_DARK)
+        tk.Label(custom_frame, text="Name:", font=("Arial", 8),
+                 bg=BG_DARK, fg=TEXT_DIM).pack(side="left")
+        custom_var = tk.StringVar()
+        custom_entry = tk.Entry(custom_frame, textvariable=custom_var, font=("Arial", 9),
+                                bg=BG_CARD, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                                relief="flat", width=18)
+        custom_entry.pack(side="left", padx=(4, 0))
+
+        def _sync_desc(*_):
+            sel = lb.curselection()
+            if not sel:
+                desc_var.set("")
+                return
+            chosen_name = display_items[sel[0]]
+            m = next((x for x in mods if x["name"] == chosen_name), None)
+            desc_var.set(f"{m['cost']} — {m['description']}" if m else "")
+            if chosen_name == "Custom…":
+                custom_frame.pack(padx=12, pady=(2, 0), fill="x")
+                custom_entry.focus_set()
+            else:
+                custom_frame.pack_forget()
+            win.update_idletasks()
+            win.geometry(f"280x{win.winfo_reqheight()}")
+
+        lb.bind("<<ListboxSelect>>", _sync_desc)
+
+        def _confirm():
+            sel = lb.curselection()
+            if not sel:
+                return
+            chosen = display_items[sel[0]]
+            if chosen == "Custom…":
+                chosen = custom_var.get().strip()
+                if not chosen:
+                    custom_entry.focus_set()
+                    return
+            win.destroy()
+            self._add_body_mod_card(chosen)
+
+        lb.bind("<Double-Button-1>", lambda e: _confirm())
+        custom_entry.bind("<Return>", lambda e: _confirm())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(4, 12))
+        tk.Button(btn_row, text="Add", command=_confirm, bg=ACCENT, fg="white",
+                  font=("Arial", 9, "bold"), relief="flat", padx=12).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", command=win.destroy, bg=BG_MID, fg=TEXT_MAIN,
+                  font=("Arial", 9), relief="flat", padx=12).pack(side="left", padx=4)
+
+        _sync_desc()
+        win.update_idletasks()
+        win.geometry(f"280x{win.winfo_reqheight()}")
+
+    def _add_body_mod_card(self, name):
+        outer = tk.Frame(self._body_mod_container, bg=BG_CARD,
+                         highlightbackground=BORDER, highlightthickness=1)
+        outer.pack(fill="x", pady=2, padx=2)
+
+        hdr = tk.Frame(outer, bg=BG_PANEL)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text=name, font=("Arial", 10, "bold"),
+                 bg=BG_PANEL, fg=GOLD, anchor="w").pack(side="left", padx=6, pady=3)
+        x_lbl = tk.Label(hdr, text="×", font=("Arial", 10, "bold"),
+                         bg=BG_PANEL, fg=TEXT_DIM, cursor="hand2")
+        x_lbl.pack(side="right", padx=6)
+
+        entry = {"name": name, "frame": outer}
+        self._body_mod_cards.append(entry)
+        self._mark_dirty()
+
+        def _remove():
+            outer.destroy()
+            self._body_mod_cards.remove(entry)
+            self._mark_dirty()
+
+        x_lbl.bind("<Button-1>", lambda e: _remove())
+
+    def _show_aberration_picker(self, event=None):
+        ab_cfg = self.cfg.get("aberrations", {})
+        groups = [
+            ("Low Taint (4–5)",     ab_cfg.get("low",             {}).get("list", [])),
+            ("Medium Taint (6–7)",  ab_cfg.get("medium",          {}).get("list", [])),
+            ("High Taint (8+)",     ab_cfg.get("high",            {}).get("list", [])),
+            ("Mental Disorders",    ab_cfg.get("mental_disorders", {}).get("list", [])),
+        ]
+
+        # Build flat display list interleaved with non-selectable headers
+        display_items = []   # each entry: (label_str, name_or_None)  None = header
+        for group_name, items in groups:
+            if not items:
+                continue
+            display_items.append((f"── {group_name} ──", None))
+            for ab in items:
+                display_items.append((ab["name"], ab["name"]))
+        display_items.append(("── Custom ──", None))
+        display_items.append(("Custom…", "Custom…"))
+
+        desc_map = {}
+        for _, items in groups:
+            for ab in items:
+                desc_map[ab["name"]] = ab.get("description", "")
+
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Add Aberration")
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="Choose an Aberration:",
+                 font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT).pack(pady=(12, 6), padx=16)
+
+        frm = tk.Frame(win, bg=BG_DARK)
+        frm.pack(padx=12, pady=(0, 4))
+        sb = tk.Scrollbar(frm, orient="vertical")
+        lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
+                        selectforeground="white", font=("Arial", 10), activestyle="none",
+                        relief="flat", width=28, height=14,
+                        yscrollcommand=sb.set)
+        sb.config(command=lb.yview)
+        lb.pack(side="left")
+        sb.pack(side="left", fill="y")
+
+        header_indices = set()
+        for i, (label, name) in enumerate(display_items):
+            if name is None:
+                lb.insert("end", f"  {label}")
+                lb.itemconfig(i, fg=GOLD, selectbackground=BG_MID, selectforeground=GOLD)
+                header_indices.add(i)
+            else:
+                lb.insert("end", f"  {label}")
+
+        # Select first real item
+        first_real = next((i for i, (_, n) in enumerate(display_items) if n is not None), 0)
+        lb.selection_set(first_real)
+        lb.see(first_real)
+
+        desc_var = tk.StringVar()
+        tk.Label(win, textvariable=desc_var, font=("Arial", 8), bg=BG_DARK, fg=TEXT_DIM,
+                 wraplength=240, justify="left").pack(padx=12, pady=(0, 4), fill="x")
+
+        custom_frame = tk.Frame(win, bg=BG_DARK)
+        tk.Label(custom_frame, text="Name:", font=("Arial", 8),
+                 bg=BG_DARK, fg=TEXT_DIM).pack(side="left")
+        custom_var = tk.StringVar()
+        custom_entry = tk.Entry(custom_frame, textvariable=custom_var, font=("Arial", 9),
+                                bg=BG_CARD, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                                relief="flat", width=20)
+        custom_entry.pack(side="left", padx=(4, 0))
+
+        def _sync(*_):
+            sel = lb.curselection()
+            if not sel:
+                return
+            idx = sel[0]
+            if idx in header_indices:
+                desc_var.set("")
+                custom_frame.pack_forget()
+                return
+            _, name = display_items[idx]
+            desc_var.set(desc_map.get(name, ""))
+            if name == "Custom…":
+                custom_frame.pack(padx=12, pady=(2, 0), fill="x")
+                custom_entry.focus_set()
+            else:
+                custom_frame.pack_forget()
+            win.update_idletasks()
+            win.geometry(f"300x{win.winfo_reqheight()}")
+
+        lb.bind("<<ListboxSelect>>", _sync)
+
+        def _confirm():
+            sel = lb.curselection()
+            if not sel:
+                return
+            idx = sel[0]
+            if idx in header_indices:
+                return
+            _, name = display_items[idx]
+            if name == "Custom…":
+                name = custom_var.get().strip()
+                if not name:
+                    custom_entry.focus_set()
+                    return
+            win.destroy()
+            self._add_aberration_card(name)
+
+        lb.bind("<Double-Button-1>", lambda e: _confirm())
+        custom_entry.bind("<Return>", lambda e: _confirm())
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(4, 12))
+        tk.Button(btn_row, text="Add", command=_confirm, bg=ACCENT, fg="white",
+                  font=("Arial", 9, "bold"), relief="flat", padx=12).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", command=win.destroy, bg=BG_MID, fg=TEXT_MAIN,
+                  font=("Arial", 9), relief="flat", padx=12).pack(side="left", padx=4)
+
+        _sync()
+        win.update_idletasks()
+        win.geometry(f"300x{win.winfo_reqheight()}")
+
+    def _add_aberration_card(self, name):
+        outer = tk.Frame(self._aberration_container, bg=BG_CARD,
+                         highlightbackground=BORDER, highlightthickness=1)
+        outer.pack(fill="x", pady=1, padx=2)
+
+        hdr = tk.Frame(outer, bg=BG_PANEL)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text=name, font=("Arial", 9, "bold"),
+                 bg=BG_PANEL, fg=TEXT_MAIN, anchor="w").pack(side="left", padx=6, pady=2)
+        x_lbl = tk.Label(hdr, text="×", font=("Arial", 9, "bold"),
+                         bg=BG_PANEL, fg=TEXT_DIM, cursor="hand2")
+        x_lbl.pack(side="right", padx=6)
+
+        entry = {"name": name, "frame": outer}
+        self._aberration_cards.append(entry)
+        self._mark_dirty()
+
+        def _remove():
+            outer.destroy()
+            self._aberration_cards.remove(entry)
+            self._mark_dirty()
+
+        x_lbl.bind("<Button-1>", lambda e: _remove())
+
     def _add_power_card(self, power_id, rating=1, techniques=None, extras_bought=None, variant=None):
         if techniques is None:
             techniques = []
@@ -852,7 +1345,10 @@ class CharacterFrame(tk.Frame):
         if not p:
             return
 
-        col = self._powers_col_left if len(self._power_cards) % 2 == 0 else self._powers_col_right
+        self.update_idletasks()
+        col = (self._powers_col_left
+               if self._powers_col_left.winfo_reqheight() <= self._powers_col_right.winfo_reqheight()
+               else self._powers_col_right)
 
         outer = tk.Frame(col, bg=BG_CARD,
                          highlightbackground=BORDER, highlightthickness=1)
@@ -908,13 +1404,46 @@ class CharacterFrame(tk.Frame):
             ("Multi-Action", "MultipleActions"),
             ("Effect",       "Effect"),
         ]
+        power_name = p.get("PowerName", "")
+        stat_traces = []
         for lbl, key in other_stat_fields:
             val = str(p.get(key, "")).strip()
-            if val and val.lower() not in ("", "none", "n/a"):
-                r = tk.Frame(stats_frame, bg=BG_CARD)
-                r.pack(fill="x", pady=0)
-                tk.Label(r, text=f"{lbl}:", font=("Arial", 8, "bold"),
-                         bg=BG_CARD, fg=TEXT_DIM, width=13, anchor="w").pack(side="left")
+            if not val or val.lower() in ("", "none", "n/a"):
+                continue
+            r = tk.Frame(stats_frame, bg=BG_CARD)
+            r.pack(fill="x", pady=0)
+            tk.Label(r, text=f"{lbl}:", font=("Arial", 8, "bold"),
+                     bg=BG_CARD, fg=TEXT_DIM, width=13, anchor="w").pack(side="left")
+            if _has_expr(val, power_name):
+                cf = tk.Frame(r, bg=BG_CARD)
+                cf.pack(side="left", fill="x", expand=True)
+                xtra = _find_expr_attr_vars(val, self._attr_vars, self._mega_vars)
+                def _upd_rich(*_, _cf=cf, _tmpl=val, _pn=power_name):
+                    for w in _cf.winfo_children():
+                        w.destroy()
+                    for seg, tag in _resolve_stat_rich(
+                            _tmpl, rating_var.get(), self._quantum_attr_var.get(),
+                            _pn, self._attr_vars, self._mega_vars):
+                        if tag == "dice":
+                            tk.Label(_cf, text=seg, font=("Arial", 8, "underline"),
+                                     bg=BG_CARD, fg=_DICE_COLOR,
+                                     cursor="hand2", anchor="w").pack(side="left")
+                        elif tag == "mega":
+                            tk.Label(_cf, text=seg, font=("Arial", 8),
+                                     bg=BG_CARD, fg=_MEGA_COLOR,
+                                     anchor="w").pack(side="left")
+                        else:
+                            tk.Label(_cf, text=seg, font=("Arial", 8),
+                                     bg=BG_CARD, fg=TEXT_MAIN,
+                                     anchor="w").pack(side="left")
+                tid_r = rating_var.trace_add("write", _upd_rich)
+                tid_q = self._quantum_attr_var.trace_add("write", _upd_rich)
+                stat_traces.append((rating_var, tid_r))
+                stat_traces.append((self._quantum_attr_var, tid_q))
+                for ev_v in xtra:
+                    stat_traces.append((ev_v, ev_v.trace_add("write", _upd_rich)))
+                _upd_rich()
+            else:
                 tk.Label(r, text=val, font=("Arial", 8),
                          bg=BG_CARD, fg=TEXT_MAIN, anchor="w",
                          wraplength=200, justify="left").pack(side="left", fill="x", expand=True)
@@ -990,7 +1519,25 @@ class CharacterFrame(tk.Frame):
 
         desc_text = format_description(p.get("Description", ""))
         if desc_text:
-            _add_description_widget(outer, desc_text)
+            tw = _add_description_widget(outer, desc_text)
+            _configure_dice_tags(tw)
+            if _has_expr(desc_text, power_name):
+                xtra = _find_expr_attr_vars(desc_text, self._attr_vars, self._mega_vars)
+                def _upd_desc(*_, _tw=tw, _tmpl=desc_text, _pn=power_name):
+                    _tw.config(state="normal")
+                    _tw.delete("1.0", "end")
+                    for seg, tag in _resolve_stat_rich(
+                            _tmpl, rating_var.get(), self._quantum_attr_var.get(),
+                            _pn, self._attr_vars, self._mega_vars):
+                        _tw.insert("end", seg, tag if tag != "normal" else ())
+                    _tw.config(state="disabled")
+                tid_r = rating_var.trace_add("write", _upd_desc)
+                tid_q = self._quantum_attr_var.trace_add("write", _upd_desc)
+                stat_traces.append((rating_var, tid_r))
+                stat_traces.append((self._quantum_attr_var, tid_q))
+                for ev_v in xtra:
+                    stat_traces.append((ev_v, ev_v.trace_add("write", _upd_desc)))
+                _upd_desc()
 
         tech_vars = {}
         if p["PowerType"] == "Mastery":
@@ -1001,20 +1548,28 @@ class CharacterFrame(tk.Frame):
             for sp in sorted(p.get("SubPowers", []), key=lambda x: x.get("ResolveOrder", 0)):
                 proficient = sp["SubPowerID"] in techniques
                 bv = self._add_sub_power_box(outer, sp, proficient,
-                                             rating_var, p.get("PowerLevel", "?"))
+                                             rating_var, p.get("PowerLevel", "?"),
+                                             stat_traces=stat_traces,
+                                             power_name=power_name)
                 tech_vars[sp["SubPowerID"]] = bv
 
         entry = {
-            "power_id":   power_id,
-            "variant":    variant,
-            "rating_var": rating_var,
-            "tech_vars":  tech_vars,
-            "extra_vars": extra_vars,
-            "frame":      outer,
+            "power_id":    power_id,
+            "variant":     variant,
+            "rating_var":  rating_var,
+            "tech_vars":   tech_vars,
+            "extra_vars":  extra_vars,
+            "frame":       outer,
+            "_stat_traces": stat_traces,
         }
         self._power_cards.append(entry)
 
         def _remove(e=entry, f=outer):
+            for var, tid in e.get("_stat_traces", []):
+                try:
+                    var.trace_remove("write", tid)
+                except Exception:
+                    pass
             self._power_cards = [c for c in self._power_cards if c is not e]
             self.after(0, f.destroy)
             self._mark_dirty()
@@ -1023,7 +1578,7 @@ class CharacterFrame(tk.Frame):
         self._mark_dirty()
 
     def _add_sub_power_box(self, parent, sp, proficient=False,
-                           rating_var=None, power_level="?"):
+                           rating_var=None, power_level="?", stat_traces=None, power_name=None):
         box = tk.Frame(parent, bg=BG_MID,
                        highlightbackground=BORDER, highlightthickness=1)
         box.pack(fill="x", padx=4, pady=2)
@@ -1055,18 +1610,67 @@ class CharacterFrame(tk.Frame):
         ]
         for lbl, key in sub_stat_fields:
             val = str(sp.get(key, "")).strip()
-            if val and val.lower() not in ("", "n/a"):
-                r = tk.Frame(stats, bg=BG_MID)
-                r.pack(fill="x")
-                tk.Label(r, text=f"{lbl}:", font=("Arial", 8, "bold"),
-                         bg=BG_MID, fg=TEXT_DIM, width=10, anchor="w").pack(side="left")
+            if not val or val.lower() in ("", "n/a"):
+                continue
+            r = tk.Frame(stats, bg=BG_MID)
+            r.pack(fill="x")
+            tk.Label(r, text=f"{lbl}:", font=("Arial", 8, "bold"),
+                     bg=BG_MID, fg=TEXT_DIM, width=10, anchor="w").pack(side="left")
+            if _has_expr(val, power_name) and rating_var is not None and stat_traces is not None:
+                cf = tk.Frame(r, bg=BG_MID)
+                cf.pack(side="left", fill="x", expand=True)
+                xtra = _find_expr_attr_vars(val, self._attr_vars, self._mega_vars)
+                def _upd_rich(*_, _cf=cf, _tmpl=val, _pn=power_name):
+                    for w in _cf.winfo_children():
+                        w.destroy()
+                    for seg, tag in _resolve_stat_rich(
+                            _tmpl, rating_var.get(), self._quantum_attr_var.get(),
+                            _pn, self._attr_vars, self._mega_vars):
+                        if tag == "dice":
+                            tk.Label(_cf, text=seg, font=("Arial", 8, "underline"),
+                                     bg=BG_MID, fg=_DICE_COLOR,
+                                     cursor="hand2", anchor="w").pack(side="left")
+                        elif tag == "mega":
+                            tk.Label(_cf, text=seg, font=("Arial", 8),
+                                     bg=BG_MID, fg=_MEGA_COLOR,
+                                     anchor="w").pack(side="left")
+                        else:
+                            tk.Label(_cf, text=seg, font=("Arial", 8),
+                                     bg=BG_MID, fg=TEXT_MAIN,
+                                     anchor="w").pack(side="left")
+                tid_r = rating_var.trace_add("write", _upd_rich)
+                tid_q = self._quantum_attr_var.trace_add("write", _upd_rich)
+                stat_traces.append((rating_var, tid_r))
+                stat_traces.append((self._quantum_attr_var, tid_q))
+                for ev_v in xtra:
+                    stat_traces.append((ev_v, ev_v.trace_add("write", _upd_rich)))
+                _upd_rich()
+            else:
                 tk.Label(r, text=val, font=("Arial", 8),
                          bg=BG_MID, fg=TEXT_MAIN, anchor="w",
                          wraplength=180, justify="left").pack(side="left", fill="x", expand=True)
 
         desc_text = format_description(sp.get("Description", ""))
         if desc_text:
-            _add_description_widget(box, desc_text)
+            tw = _add_description_widget(box, desc_text)
+            _configure_dice_tags(tw)
+            if _has_expr(desc_text, power_name) and rating_var is not None and stat_traces is not None:
+                xtra = _find_expr_attr_vars(desc_text, self._attr_vars, self._mega_vars)
+                def _upd_desc(*_, _tw=tw, _tmpl=desc_text, _pn=power_name):
+                    _tw.config(state="normal")
+                    _tw.delete("1.0", "end")
+                    for seg, tag in _resolve_stat_rich(
+                            _tmpl, rating_var.get(), self._quantum_attr_var.get(),
+                            _pn, self._attr_vars, self._mega_vars):
+                        _tw.insert("end", seg, tag if tag != "normal" else ())
+                    _tw.config(state="disabled")
+                tid_r = rating_var.trace_add("write", _upd_desc)
+                tid_q = self._quantum_attr_var.trace_add("write", _upd_desc)
+                stat_traces.append((rating_var, tid_r))
+                stat_traces.append((self._quantum_attr_var, tid_q))
+                for ev_v in xtra:
+                    stat_traces.append((ev_v, ev_v.trace_add("write", _upd_desc)))
+                _upd_desc()
 
         return bv
 
@@ -1470,7 +2074,8 @@ class CharacterFrame(tk.Frame):
             self._health_bash[state_label] = bash_svars
             self._health_leth[state_label] = leth_svars
 
-            pen_str = f"{penalty:+d}" if penalty != 0 else " 0"
+            pen_str = ("" if state_label in ("Incapacitated", "Dead")
+                       else f"{penalty:+d}" if penalty != 0 else " 0")
             is_dead = (state_label == "Dead")
 
             for box_idx in range(count):
@@ -2129,13 +2734,14 @@ class CharacterFrame(tk.Frame):
             }
             for entry in self._power_cards
         ]
+        c["body_modifications"] = [e["name"] for e in self._body_mod_cards]
         c["mega_attributes"] = {ma: v.get() for ma, v in self._mega_vars.items()}
 
         c["willpower_perm"]  = self._wp_perm_var.get()
         c["willpower_temp"]  = self._wp_temp_var.get()
         c["taint_perm"]      = self._taint_perm_var.get()
         c["taint_temp"]      = self._taint_temp_var.get()
-        c["aberrations"]     = self._aberr_var.get()
+        c["aberrations"]     = [e["name"] for e in self._aberration_cards]
         c["quantum"]         = self._quantum_attr_var.get()
         c["quantum_pool_max"]     = self._qp_max_var.get()
         c["quantum_pool_current"] = self._qp_cur_var.get()
@@ -2205,6 +2811,11 @@ class CharacterFrame(tk.Frame):
                 extras_bought=pw.get("extras", []),
                 variant=pw.get("variant"),
             )
+        for entry in self._body_mod_cards:
+            entry["frame"].destroy()
+        self._body_mod_cards = []
+        for name in c.get("body_modifications", []):
+            self._add_body_mod_card(name)
         for ma, var in self._mega_vars.items():
             var.set(c.get("mega_attributes", {}).get(ma, 0))
 
@@ -2212,7 +2823,11 @@ class CharacterFrame(tk.Frame):
         self._wp_temp_var.set(c.get("willpower_temp", 5))
         self._taint_perm_var.set(c.get("taint_perm", 0))
         self._taint_temp_var.set(c.get("taint_temp", 0))
-        self._aberr_var.set(c.get("aberrations", ""))
+        for entry in self._aberration_cards:
+            entry["frame"].destroy()
+        self._aberration_cards = []
+        for name in c.get("aberrations", []):
+            self._add_aberration_card(name)
         self._quantum_attr_var.set(c.get("quantum", 1))
         self._qp_max_var.set(c.get("quantum_pool_max", 20))
         self._qp_cur_var.set(c.get("quantum_pool_current", 0))

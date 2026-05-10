@@ -54,6 +54,13 @@ def migrate_char(data):
     if "portrait" not in data:
         data["portrait"] = ""
         migrated = True
+    if "body_modifications" not in data:
+        data["body_modifications"] = []
+        migrated = True
+    if isinstance(data.get("aberrations"), str):
+        old = data["aberrations"].strip()
+        data["aberrations"] = [old] if old else []
+        migrated = True
     # Convert old fixed-slot custom_abilities {"ATTR__custom_0": [name, val]} →
     # new list format {"ATTR": [[name, val], ...]}
     custom = data.get("custom_abilities", {})
@@ -88,7 +95,7 @@ def empty_character(cfg):
         "mega_attributes": {ma: 0 for ma in cfg["mega_attributes"]},
         "willpower_perm": 3, "willpower_temp": 3,
         "taint_perm": 0, "taint_temp": 0,
-        "aberrations": "",
+        "aberrations": [],
         "quantum": 1,
         "quantum_pool_max": 20, "quantum_pool_current": 0,
         "attacks": [{"name": "", "acc": "", "dmg": "", "rof": "", "ft": ""} for _ in range(cfg["num_attack_rows"])],
@@ -96,6 +103,7 @@ def empty_character(cfg):
         "soak_bashing": "", "soak_lethal": "",
         "game_notes": "",
         "portrait": "",
+        "body_modifications": [],
         "app_version": APP_VERSION,
     }
     for attr, skills in cfg["abilities"].items():
