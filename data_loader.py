@@ -57,6 +57,18 @@ def migrate_char(data):
     if "body_modifications" not in data:
         data["body_modifications"] = []
         migrated = True
+    if "combat_attacks" not in data:
+        data["combat_attacks"] = ["Strike", "Kick"]
+        migrated = True
+    if "equipment_weapons" not in data:
+        data["equipment_weapons"] = []
+        migrated = True
+    if "equipment_armor" not in data:
+        data["equipment_armor"] = []
+        migrated = True
+    if "equipment_misc" not in data:
+        data["equipment_misc"] = []
+        migrated = True
     if isinstance(data.get("aberrations"), str):
         old = data["aberrations"].strip()
         data["aberrations"] = [old] if old else []
@@ -98,7 +110,10 @@ def empty_character(cfg):
         "aberrations": [],
         "quantum": 1,
         "quantum_pool_max": 20, "quantum_pool_current": 0,
-        "attacks": [{"name": "", "acc": "", "dmg": "", "rof": "", "ft": ""} for _ in range(cfg["num_attack_rows"])],
+        "combat_attacks": ["Strike", "Kick"],
+        "equipment_weapons": [],
+        "equipment_armor":   [],
+        "equipment_misc":    [],
         "armors":  [{"name": "", "b": "", "l": "", "bulk": "", "ft": ""} for _ in range(cfg["num_armor_rows"])],
         "soak_bashing": "", "soak_lethal": "",
         "game_notes": "",

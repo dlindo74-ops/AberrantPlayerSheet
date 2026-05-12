@@ -5,6 +5,66 @@ Format: version — date — description
 
 ---
 
+## [1.9.0] — 2026-05-11
+### Added
+- **Absorption variant picker** — same two-stage picker as Invulnerability: 6 standard types (Fire, Ice, Earth, Light, Air, Magnetic attacks), 3 starred broad-category types (Mental powers, Energy attacks, Physical attacks), and "Quantum power *" sub-picker
+- `BroadCategoryVariants` and `QuantumPowerVariant` fields added to PWR009 in `powers.json`; original "Energy"/"Kinetic" variants replaced with the full type list
+### Changed
+- Quantum power sub-picker window now has a vertical scrollbar
+- Sub-picker title and prompt are now dynamic (use the parent power's name) instead of hardcoded "Invulnerability"
+
+---
+
+## [1.8.0] — 2026-05-11
+### Added
+- **Invulnerability variant picker** — adding Invulnerability now opens a two-stage picker:
+  - Standard options: Fire, Ice, Earth, Light, Air, Magnetic attacks
+  - Broad Category options (marked `*`): Mental powers, Energy attacks, Physical attacks — labelled with a note that the Broad Category extra is required
+  - "Quantum power *" option opens a second picker listing every non-Miscellaneous power (except Invulnerability itself); the chosen power name is stored as `"Quantum power: Flight"` etc.
+  - Already-used variants are filtered out so the same type cannot be added twice; each specific quantum-power variant is tracked independently
+  - Card title follows `Invulnerability ({variant})` template, e.g. "Invulnerability (Fire)" or "Invulnerability (Quantum power: Flight)"
+- `Variants`, `BroadCategoryVariants`, `QuantumPowerVariant`, `VariantNameTemplate` fields added to PWR028 in `powers.json`
+### Changed
+- `_show_variant_picker` extended to support `BroadCategoryVariants` (starred items with footnote) and `QuantumPowerVariant` (triggers second-stage power sub-picker)
+- Fixed DMG column in attack section: removed the `dmg_inner` intermediate frame that caused the resolved damage value to float off-centre and appear invisible; labels now pack directly with `fill="x"` into the column frame
+
+---
+
+## [1.7.0] — 2026-05-10
+### Changed
+- **Combat tab — attack section layout** — dice pool number is left-aligned next to the formula text; pool number is underlined green and has a `cursor="hand2"` (dice roller hook stub)
+- **Combat tab — armor section** — replaced old static armor grid with a live-synced table populated from the Equipment tab; columns: Name / Equipped (checkbox) / Soak B / Soak L / Protection / Penalty; old `armors` save key is flushed on load
+- **Combat tab — weapons sub-section** — melee/ranged weapons added in the Equipment tab now appear automatically under a WEAPONS sub-header in the attack zone; pool = Dexterity + skill (Melee for melee, Firearms for ranged/heavy, Athletics for grenades)
+- **Damage resolution — maneuvers** — damage formulas like `Strength +2` or `Strength +3` resolve live against the character's current Strength; Mega-Strength adds +3 per dot on top of the base
+- **Damage resolution — weapons** — melee weapon damage in the `StrengthNd10` format now resolves live: with Strength 5 and a Knife (`Strength+2d10`) the damage column shows `7d10`; updates whenever Strength changes; weapons with non-Strength damage (firearms, grenades) are shown as-is
+- Normalised all melee weapon damage strings in `aberrant_config.json` from `Str+` shorthand to full `Strength+` form
+
+---
+
+## [1.6.0] — 2026-05-10
+### Added
+- **Equipment tab** — new tab between Combat and Quantum Powers with three stacked zones:
+  - **Weapons** — four sub-sections (Melee, Ranged, Heavy Weapons, Grenades); each section shows all stats as horizontal columns specific to its weapon type; `+ Add Weapon` opens a two-step picker (category → item); catalog items can be added from `aberrant_config.json`; each zone also allows a **Custom…** option that opens a dialog with the correct fields for that category; weapon names are editable in-place after adding; × removes
+  - **Armor** — single table with columns Soak B / Soak L / Protection / Penalty / Conceal / Cost / Dest; `+ Add Armor` picker lists all catalog armors plus Custom…; names editable; × removes; **Eufiber armor** is auto-managed: when the character has a Eufiber background ≥ 1, an italicised "Eufiber" row is automatically inserted with soak B = soak L = rating, protection = Full Body, penalty = 0, conceal = J; the row updates live as the Eufiber background dots change and disappears when the background is removed
+  - **Miscellaneous** — free-form items with Name, Notes, and Cost columns; `+ Add Item` opens a simple dialog
+- `equipment_weapons`, `equipment_armor`, `equipment_misc` keys added to character file and migration guard; old saves load cleanly; Eufiber row is not saved (always reconstructed from the background rating)
+- Equipment data (`melee_weapons`, `ranged_weapons`, `heavy_weapons`, `grenades`, `armor`) added to `aberrant_config.json`
+
+---
+
+## [1.5.0] — 2026-05-10
+### Changed
+- **Dynamic attack section** — the static ATTACK grid in the Combat tab is replaced with a card-per-maneuver layout; by default every new character starts with **Strike** and **Kick**; a **+ Add Attack** button in the section header opens a picker grouped into Close Combat, Special/Nova, and Ranged Combat; any maneuver from `aberrant_config.json` can be added, and the same maneuver may be taken more than once (e.g. multiple power-based attacks)
+- **Auto-calculated dice pools** — each attack card shows a live pool row for every listed ability; pool = parent attribute + ability (matching the attribute→ability hierarchy in the config), with mega-attribute dice shown in red in parentheses when > 0; example: Strength 3 + Brawl 4 + Mega-Strength 1 displays as `7 (1)`; two abilities (e.g. Brawl / Martial Arts) produce two separate pool rows
+- **Auto-calculated damage** — damage formulas like `Strength +2` or `Strength +3` are evaluated live against the character's current Strength; `Special`, `Weapon`, and `0` are shown as-is
+- **Quantum power maneuvers** — abilities that are power names (e.g. Flight, Bodymorph) use Dexterity + power rating as their pool; if the character does not own the power the pool shows `—`; pool updates live if the power card was already present when the attack card was created
+- **Power Block** — left untouched (shows "Special — see power"); will be implemented in a future release
+- Accuracy and difficulty modifiers are shown in the card header when they differ from Normal
+- `combat_attacks` key added to character file (list of maneuver name strings); old saves migrated automatically with default Strike + Kick on first open
+- `combat_maneuvers` data (close\_combat, special\_nova, ranged\_combat) added to `aberrant_config.json`
+
+---
+
 ## [1.4.0] — 2026-05-08
 ### Changed
 - **Full attribute resolution in expressions** — `_resolve_stat_rich` replaces the old `_resolve_stat_text`; all nine standard attributes (Strength, Dexterity, Stamina, Perception, Intelligence, Wits, Appearance, Manipulation, Charisma) are now recognised as tokens inside `(…)` and `[…]` expression groups and substituted with the character's current attribute values, live-updating whenever the attribute dots change

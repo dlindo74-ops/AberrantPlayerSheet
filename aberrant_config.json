@@ -512,146 +512,747 @@
     "Node",
     "Resources"
   ],
-  "aberrations": {
-    "low": {
-      "taint_range": "4-5",
-      "list": [
-        {
-          "name": "Aberrant Eyes",
-          "description": "Something is strange about the nova's eyes. They may be a weird color (glowing red, pure white, jet black) or display some pattern. At lower Taint, simply an unusual color or odd pattern; at medium levels they appear inhuman (cat's eyes); at higher levels they physically change form."
-        },
-        {
-          "name": "Anima Banner",
-          "description": "The nova's anima visibly manifests around her when she uses her powers, or even when she doesn't. It is a holographic, audial or telepathic manifestation of some object or symbol important to the character's subconscious. The anima has no tangible effect; it is merely a display of quantum energies."
-        },
-        {
-          "name": "Bulging Muscles",
-          "description": "The nova's muscles bulge inhumanly, making him appear like a bodybuilder on steroids. He isn't necessarily any stronger than normal, he just looks like a modern-day Hercules. This aberration may inhibit his ability to fit into cramped spaces."
-        },
-        {
-          "name": "Colored Skin",
-          "description": "The nova's skin turns an unusual, not necessarily unattractive, color — golden, bright cobalt blue, green, scarlet, silver or whatever the Storyteller can think of. The nova's hair or eyes may also change color."
-        },
-        {
-          "name": "Feeding Requirement",
-          "description": "The nova develops a dependence/addiction to some food, substance or form of energy she must ingest to fuel her powers. At low Taint, a relatively ordinary food or substance. At medium and higher levels, the demands become more extreme — possibly blood, plutonium, or human flesh."
-        },
-        {
-          "name": "Glow",
-          "description": "The nova is so filled with quantum energies that he can't completely hold them in. He intermittently emits them in a soft glow, or perhaps crackling sparks or similar phenomenon. In the dark, the difficulty to hit the nova with an attack is reduced by one."
-        },
-        {
-          "name": "Unearthly Beauty",
-          "description": "The nova is the paragon of handsomeness or beauty. His hair is always perfect, his build perfect — but he is just too perfect, and it is eerie and disturbing. Even other 'beautiful people' seem uneasy around him, sometimes expressing their unease through vicious jealousy, envy, barbed humor or the like."
-        }
-      ]
+  "combat_maneuvers": {
+    "close_combat": [
+      {
+        "name": "Block",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Special",
+        "difficulty": "Normal",
+        "damage": "0"
+      },
+      {
+        "name": "Clinch",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Normal",
+        "damage": "Strength +2"
+      },
+      {
+        "name": "Disarm",
+        "ability": [
+          "Martial Arts",
+          "Melee"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Special",
+        "damage": "Special"
+      },
+      {
+        "name": "Dodge",
+        "ability": [
+          "Athletics",
+          "Martial Arts"
+        ],
+        "accuracy": "N/A",
+        "difficulty": "Special",
+        "damage": "0"
+      },
+      {
+        "name": "Hold",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Normal",
+        "damage": "0"
+      },
+      {
+        "name": "Kick",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "+1",
+        "damage": "Strength +3"
+      },
+      {
+        "name": "Parry",
+        "ability": [
+          "Melee"
+        ],
+        "accuracy": "Special",
+        "difficulty": "Normal",
+        "damage": "0"
+      },
+      {
+        "name": "Power Block",
+        "ability": [
+          "Dexterity + power rating"
+        ],
+        "accuracy": "Special",
+        "difficulty": "Normal",
+        "damage": "0"
+      },
+      {
+        "name": "Strike",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Normal",
+        "damage": "Strength +2"
+      },
+      {
+        "name": "Sweep",
+        "ability": [
+          "Martial Arts",
+          "Melee"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Normal",
+        "damage": "Special"
+      },
+      {
+        "name": "Tackle",
+        "ability": [
+          "Brawl"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "+1",
+        "damage": "Strength +3"
+      },
+      {
+        "name": "Throw",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "+1",
+        "damage": "Special"
+      },
+      {
+        "name": "Weapon Strike",
+        "ability": [
+          "Melee"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Normal",
+        "damage": "Weapon"
+      }
+    ],
+    "special_nova": [
+      {
+        "name": "Aerial Slam",
+        "ability": [
+          "Flight"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "+1",
+        "damage": "Special"
+      },
+      {
+        "name": "Aerial Strike",
+        "ability": [
+          "Flight"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "+1",
+        "damage": "Special"
+      },
+      {
+        "name": "Asphyxiation",
+        "ability": [
+          "Bodymorph"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Normal",
+        "damage": "Special"
+      },
+      {
+        "name": "Hyperspeed Slam",
+        "ability": [
+          "Brawl"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "+1",
+        "damage": "Special"
+      },
+      {
+        "name": "Hyperspeed Strike",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "+1",
+        "damage": "Special"
+      },
+      {
+        "name": "Smackdown",
+        "ability": [
+          "Brawl",
+          "Martial Arts"
+        ],
+        "accuracy": "Normal",
+        "difficulty": "Special",
+        "damage": "Strength +6"
+      }
+    ],
+    "ranged_combat": [
+      {
+        "name": "Automatic Fire",
+        "ability": [
+          "Firearms"
+        ],
+        "accuracy": "+10",
+        "difficulty": "+2",
+        "damage": "Special"
+      },
+      {
+        "name": "Multiple Shots",
+        "ability": [
+          "Firearms"
+        ],
+        "accuracy": "Special",
+        "difficulty": "Normal",
+        "damage": "Weapon"
+      },
+      {
+        "name": "Semiauto Burst",
+        "ability": [
+          "Firearms"
+        ],
+        "accuracy": "+2",
+        "difficulty": "Special",
+        "damage": "Weapon"
+      },
+      {
+        "name": "Spray",
+        "ability": [
+          "Firearms"
+        ],
+        "accuracy": "+10",
+        "difficulty": "Special",
+        "damage": "Special"
+      },
+      {
+        "name": "Strafing",
+        "ability": [
+          "Firearms"
+        ],
+        "accuracy": "+10",
+        "difficulty": "Special",
+        "damage": "Special"
+      },
+      {
+        "name": "Two Weapons",
+        "ability": [
+          "Firearms"
+        ],
+        "accuracy": "Special",
+        "difficulty": "Special",
+        "damage": "Weapon"
+      }
+    ]
+  },
+  "melee_weapons": [
+    {
+      "type": "Automobile",
+      "damage": "Strength+6/10d10",
+      "damage_type": "B",
+      "str_min": "Mega 1",
+      "str_max": "Mega 3",
+      "conceal": "N",
+      "mass_kg": 1000,
+      "cost_dots": 2
     },
-    "medium": {
-      "taint_range": "6-7",
-      "list": [
-        {
-          "name": "Allergic Reaction",
-          "description": "The nova loses dice from dice pools, or possibly even takes damage, from exposure to a particular substance or phenomenon harmless to baselines. Examples include specific elements or substances, sunlight (or its absence), or certain types of energy fields. The Storyteller determines how much damage the nova takes based on the amount, purity and/or power of the substance."
-        },
-        {
-          "name": "Energy Emission",
-          "description": "The nova's ability to control the awesome energies coursing through his body has been compromised. He constantly gives off small 'sparks' of energy that may pose a danger to people and objects around him. The nature of the emissions depends upon the nova's powers."
-        },
-        {
-          "name": "Hormonal Imbalance (Lust)",
-          "description": "Members of the preferred sex, especially those who are in any way attractive, tend to inspire unabiding desire in the nova. More honorable novas will resist this unnatural attraction, but those of darker bent are perfectly capable of engaging in acts up to and including rape to get what they want."
-        },
-        {
-          "name": "Hormonal Imbalance (Rage)",
-          "description": "The nova becomes prone to fits of blinding, destructive rage. When angered, she tends to attack without regard for her own defense or surroundings. Unless the player succeeds in a Willpower roll, the nova will use any and all power at her command. Once berserk, the nova's player must make a Willpower roll at difficulty +1 to 'snap out of it.'"
-        },
-        {
-          "name": "Mental Disorders",
-          "description": "The most common form of mental Taint, especially common in novas with mental powers or high-instar M-R nodes. The nova develops a mental disorder of some sort; the more tainted she becomes, the more the disorder affects her behavior, or she may develop additional, even stranger, psychoses."
-        },
-        {
-          "name": "Twisted Limbs",
-          "description": "The nova's arms and/or legs are bent, twisted and warped. They may be unnaturally long, oddly slender (yet lacking nothing in strength), have joints which bend at disturbing angles or even an extra joint or two."
-        },
-        {
-          "name": "Vulnerability",
-          "description": "The nova's body becomes so changed that he takes extra damage from a particular type of attack (such as fire, electricity or Disintegration). The effect of any attack or power based on that type of attack is increased by three dice."
-        }
-      ]
+    {
+      "type": "Ax",
+      "damage": "Strength+4d10",
+      "damage_type": "L",
+      "str_min": 2,
+      "str_max": 5,
+      "conceal": "N",
+      "mass_kg": 3,
+      "cost_dots": 1
     },
-    "high": {
-      "taint_range": "8+",
-      "list": [
-        {
-          "name": "Contagious",
-          "description": "The nova's altered body exudes a virus that is harmful to baselines. This does not affect the character or other novas, but for baselines the nova may well be a walking Typhoid Mary or Black Death."
-        },
-        {
-          "name": "Hardened Skin",
-          "description": "The nova's skin can no longer really be described as 'skin.' Instead, it's hardened into chitin, metal, horn, wood, scales, shell, sharklike 'sandpaper skin' or something similar. It's obviously not normal to the touch or the eye. It may be covered with horns, spikes, barbs, ridges or similar features. The Storyteller's option as to whether this provides any armor or protection."
-        },
-        {
-          "name": "Megalomania",
-          "description": "The nova develops a 'god complex.' She truly believes herself to be the loftiest, mightiest, most power being in the world. She requires absolute obedience (perhaps even worship) from her lessers. Megalomania is particularly dangerous because the nova will wish to acquire more power as quickly as possible, which often means acquiring tainted quantum powers."
-        },
-        {
-          "name": "Oozing Skin",
-          "description": "The nova's skin is covered with slime, mucus or a similar loathsome substance. It may ooze out of his pores at a constant slow rate, or just somehow remain on him all the time. At the Storyteller's option, the slime may be mildly poisonous or acidic."
-        },
-        {
-          "name": "Permanent Power",
-          "description": "One of the nova's powers becomes permanent, unable to be suppressed. This permanence has the advantage that the power costs no quantum points to use; however, the power might make it exceedingly difficult for the nova to interact with the rest of her environment. Examples include Density Control, Immolate and Bodymorph."
-        },
-        {
-          "name": "Radioactive",
-          "description": "The nova cannot fully control her quantum emissions. She emits soft, or possibly even hard, radiation. The amount of radiation she emits increases as she spends additional quantum points."
-        },
-        {
-          "name": "Second Self",
-          "description": "One or more other bodies begins to sprout from the nova's body. Often the 'extra' bodies are limited to just faces — a face on the side of the nova's head, in his chest, in his stomach or on his thigh. In some cases more body parts such as shoulders or limbs emerge. This aberration seems to be more common among novas with powers such as Telepathy."
-        },
-        {
-          "name": "Sheer Hideousness",
-          "description": "The nova is too horrifying for description. He is somehow warped, twisted, deformed or otherwise looks like he was broken and put back together by someone who didn't know what a person should look like. His Appearance Attribute drops to zero, and he gains a permanent version of the Face of Terror Mega-Appearance enhancement."
-        },
-        {
-          "name": "Sloughed Flesh",
-          "description": "The nova's skin and flesh no longer sit right on his bones. He looks as if he were made of wax and left too close to the fire — he seems slightly melted or askew, with skin and flesh bunched up where it should be thin, and paper-thin where it should rest thick on the skeleton."
-        },
-        {
-          "name": "Vestigial Limbs",
-          "description": "The nova has some extra, but functionally useless, limbs. These may be tiny withered arms, flightless wings (leathery or feathered) growing out of his back, a lifeless tail, or a set of tentacles below his arms or sprouting from his chest. The most any of these limbs can do is weakly hold on to very light objects, such as empty plastic cups."
-        }
-      ]
+    {
+      "type": "Chain",
+      "damage": "Strength+5d10",
+      "damage_type": "B",
+      "str_min": 1,
+      "str_max": "Mega 1",
+      "conceal": "P",
+      "mass_kg": 2.5,
+      "cost_dots": 1
     },
-    "mental_disorders": {
-      "description": "Mental disorders may be imposed by Taint or arise independently. For each point of permanent Taint a nova has, the player must subtract one die from his Willpower dice pool when rolling to resist the effects of mental disorders (to a minimum of one die).",
-      "list": [
-        {
-          "name": "Amnesia",
-          "description": "You forget a significant segment of your past due to physical trauma or mental scarring. This affliction can be so acute as to erase all memories or simply cause you to forget a few hours of time."
-        },
-        {
-          "name": "Delusions",
-          "description": "Your mind plays tricks on itself. You see and hear things that don't actually exist. Mild cases can be distracting, while potent delusions can cause a complete detachment from reality."
-        },
-        {
-          "name": "Multiple Personality Disorder",
-          "description": "Trauma can cause a single personality to splinter into distinct shards. Each personality possesses its own Nature and behaves differently from the others."
-        },
-        {
-          "name": "Obsessive/Compulsive Disorder",
-          "description": "You are unable to resist a certain urge. This urge may cause you to perform ludicrous tasks or to seek absolute perfection in every detail."
-        },
-        {
-          "name": "Polar/Bipolar Disorder",
-          "description": "Also known as depression, polar disorder causes lethargy, depression and an inability to function in normal society for months at a time. Manic-depressives suffer the same symptoms, but their bouts are interspersed with energetic bursts."
-        },
-        {
-          "name": "Schizophrenia",
-          "description": "This affliction causes a complete detachment from reality. Acute cases of paranoid schizophrenia are accompanied by severe delusions of persecution and elaborate paranoid theories."
-        }
-      ]
+    {
+      "type": "Club",
+      "damage": "Strength+4d10",
+      "damage_type": "B",
+      "str_min": 1,
+      "str_max": 5,
+      "conceal": "T",
+      "mass_kg": 1,
+      "cost_dots": 1
+    },
+    {
+      "type": "Lamppost",
+      "damage": "Strength+6/10d10",
+      "damage_type": "B",
+      "str_min": "Mega 1",
+      "str_max": "Mega 2",
+      "conceal": "N",
+      "mass_kg": 100,
+      "cost_dots": 2
+    },
+    {
+      "type": "Knife",
+      "damage": "Strength+2d10",
+      "damage_type": "L",
+      "str_min": 1,
+      "str_max": 5,
+      "conceal": "J",
+      "mass_kg": 0.5,
+      "cost_dots": 1
+    },
+    {
+      "type": "Staff",
+      "damage": "Strength+6d10",
+      "damage_type": "B",
+      "str_min": 2,
+      "str_max": 5,
+      "conceal": "N",
+      "mass_kg": 3,
+      "cost_dots": 1
+    },
+    {
+      "type": "Sword",
+      "damage": "Strength+5d10",
+      "damage_type": "L",
+      "str_min": 3,
+      "str_max": "Mega 1",
+      "conceal": "T",
+      "mass_kg": 3,
+      "cost_dots": 2
+    },
+    {
+      "type": "Tree",
+      "damage": "Strength+6/10d10",
+      "damage_type": "B",
+      "str_min": "Mega 1",
+      "str_max": "Mega 3",
+      "conceal": "N",
+      "mass_kg": 500,
+      "cost_dots": 1
+    },
+    {
+      "type": "Truck",
+      "damage": "Strength+7/12d10",
+      "damage_type": "B",
+      "str_min": "Mega 2",
+      "str_max": "Mega 4",
+      "conceal": "N",
+      "mass_kg": 10000,
+      "cost_dots": 4
     }
-  }
+  ],
+  "ranged_weapons": [
+    {
+      "type": "Revolver, Lt.",
+      "accuracy": 0,
+      "damage": "4d10",
+      "damage_type": "L",
+      "range_m": 50,
+      "maneuvers": ["Ms", "Tw"],
+      "rof": 2,
+      "clip": 6,
+      "conceal": "P",
+      "mass_kg": 0.5,
+      "cost_dots": 1
+    },
+    {
+      "type": "Revolver, Hvy.",
+      "accuracy": 0,
+      "damage": "5d10",
+      "damage_type": "L",
+      "range_m": 50,
+      "maneuvers": ["Ms", "Tw"],
+      "rof": 2,
+      "clip": 6,
+      "conceal": "J",
+      "mass_kg": 0.5,
+      "cost_dots": 2
+    },
+    {
+      "type": "Pistol, Lt.",
+      "accuracy": 0,
+      "damage": "4d10",
+      "damage_type": "L",
+      "range_m": 50,
+      "maneuvers": ["Af", "Ms", "Tw"],
+      "rof": 4,
+      "clip": "17+1",
+      "conceal": "P",
+      "mass_kg": 0.5,
+      "cost_dots": 1
+    },
+    {
+      "type": "Pistol, Hvy.",
+      "accuracy": 0,
+      "damage": "5d10",
+      "damage_type": "L",
+      "range_m": 50,
+      "maneuvers": ["Af", "Ms", "Tw"],
+      "rof": 3,
+      "clip": "7+1",
+      "conceal": "J",
+      "mass_kg": 0.5,
+      "cost_dots": 2
+    },
+    {
+      "type": "Rifle",
+      "accuracy": 2,
+      "damage": "8d10",
+      "damage_type": "L",
+      "range_m": 200,
+      "maneuvers": [],
+      "rof": 1,
+      "clip": "5+1",
+      "conceal": "N",
+      "mass_kg": 3,
+      "cost_dots": 2
+    },
+    {
+      "type": "Flechette Rifle",
+      "accuracy": 1,
+      "damage": "6d10",
+      "damage_type": "L",
+      "range_m": 35,
+      "maneuvers": ["Ms", "St"],
+      "rof": 5,
+      "clip": 40,
+      "conceal": "J",
+      "mass_kg": 1,
+      "cost_dots": 4
+    },
+    {
+      "type": "Taser",
+      "accuracy": 0,
+      "damage": "6d10",
+      "damage_type": "B",
+      "range_m": 20,
+      "maneuvers": ["Tw"],
+      "rof": 1,
+      "clip": 20,
+      "conceal": "J",
+      "mass_kg": 1.5,
+      "cost_dots": 2
+    },
+    {
+      "type": "SMG, Small",
+      "accuracy": 0,
+      "damage": "6d10",
+      "damage_type": "L",
+      "range_m": 50,
+      "maneuvers": ["Af", "Ms", "Sa", "St", "Tw"],
+      "rof": 40,
+      "clip": 40,
+      "conceal": "J",
+      "mass_kg": 2.5,
+      "cost_dots": 2
+    },
+    {
+      "type": "SMG, Large",
+      "accuracy": 0,
+      "damage": "7d10",
+      "damage_type": "L",
+      "range_m": 50,
+      "maneuvers": ["Af", "Ms", "Sa", "St", "Tw"],
+      "rof": 45,
+      "clip": 50,
+      "conceal": "N",
+      "mass_kg": 3,
+      "cost_dots": 3
+    },
+    {
+      "type": "Shotgun",
+      "accuracy": 5,
+      "damage": "6d10",
+      "damage_type": "L",
+      "range_m": 30,
+      "maneuvers": ["Ms"],
+      "rof": 2,
+      "clip": "8+1",
+      "conceal": "T",
+      "mass_kg": 3,
+      "cost_dots": 2
+    },
+    {
+      "type": "Thrown Object",
+      "accuracy": 0,
+      "damage": "Strength/Mega-Strength +/-1-3",
+      "damage_type": "B/L",
+      "range_m": null,
+      "maneuvers": [],
+      "rof": 1,
+      "clip": null,
+      "conceal": null,
+      "mass_kg": null,
+      "cost_dots": null
+    }
+  ],
+  "heavy_weapons": [
+    {
+      "type": "30mm cannon",
+      "accuracy": 0,
+      "damage": "8d10",
+      "auto_damage": 5,
+      "damage_type": "L",
+      "range_m": 800,
+      "rof": 21,
+      "capacity": 100,
+      "mass_kg": 50,
+      "cost_dots": 4
+    },
+    {
+      "type": "105mm gun",
+      "accuracy": 2,
+      "damage": "15d10",
+      "auto_damage": 10,
+      "damage_type": "L",
+      "range_m": 1200,
+      "rof": 1,
+      "capacity": 1,
+      "mass_kg": null,
+      "cost_dots": 5
+    },
+    {
+      "type": "Antitank, portable",
+      "accuracy": 0,
+      "damage": "10d10",
+      "auto_damage": 8,
+      "damage_type": "L",
+      "range_m": 200,
+      "rof": 1,
+      "capacity": 1,
+      "mass_kg": 10,
+      "cost_dots": 3
+    },
+    {
+      "type": "Antitank, vehicle",
+      "accuracy": 4,
+      "damage": "12d10",
+      "auto_damage": 10,
+      "damage_type": "L",
+      "range_m": 2500,
+      "rof": 1,
+      "capacity": 8,
+      "mass_kg": 120,
+      "cost_dots": 4
+    },
+    {
+      "type": "Artillery",
+      "accuracy": -2,
+      "damage": "20d10",
+      "auto_damage": 15,
+      "damage_type": "L",
+      "range_m": 16093,
+      "rof": 1,
+      "capacity": 1,
+      "mass_kg": 3000,
+      "cost_dots": 5
+    },
+    {
+      "type": "Flamethrower",
+      "accuracy": 4,
+      "damage": "10d10",
+      "auto_damage": null,
+      "damage_type": "L",
+      "damage_note": "per turn",
+      "range_m": 10,
+      "rof": 1,
+      "capacity": 30,
+      "mass_kg": 100,
+      "cost_dots": 3
+    },
+    {
+      "type": "Grenade Launcher",
+      "accuracy": -2,
+      "damage": "Varies",
+      "auto_damage": null,
+      "damage_type": null,
+      "range_m": 400,
+      "rof": 1,
+      "capacity": 1,
+      "mass_kg": 12,
+      "cost_dots": 3
+    },
+    {
+      "type": "Mortar",
+      "accuracy": -2,
+      "damage": "10d10",
+      "auto_damage": 8,
+      "damage_type": "L",
+      "range_m": 1300,
+      "rof": 1,
+      "capacity": 1,
+      "mass_kg": 100,
+      "cost_dots": 3
+    },
+    {
+      "type": "Portable Laser",
+      "accuracy": 2,
+      "damage": "13d10",
+      "auto_damage": 12,
+      "damage_type": "L",
+      "range_m": 1000,
+      "rof": 1,
+      "capacity": 10,
+      "mass_kg": 100,
+      "cost_dots": 5
+    },
+    {
+      "type": "SAM, portable",
+      "accuracy": 2,
+      "damage": "12d10",
+      "auto_damage": 12,
+      "damage_type": "L",
+      "range_m": 4000,
+      "rof": 1,
+      "capacity": 1,
+      "mass_kg": 50,
+      "cost_dots": 4
+    },
+    {
+      "type": "SAM, vehicle",
+      "accuracy": 4,
+      "damage": "15d10",
+      "auto_damage": 15,
+      "damage_type": "L",
+      "range_m": 40000,
+      "rof": 1,
+      "capacity": 4,
+      "mass_kg": 3000,
+      "cost_dots": 6
+    }
+  ],
+  "grenades": [
+    {
+      "type": "Fragmentation",
+      "damage": "8d10",
+      "damage_type": "L",
+      "special": "Full damage within 3m; half damage to 6m from ground zero."
+    },
+    {
+      "type": "Shaped Charge",
+      "damage": "10d10",
+      "auto_damage": 8,
+      "damage_type": "L",
+      "special": "No blast effect."
+    },
+    {
+      "type": "Tear Gas",
+      "damage": "4d10",
+      "damage_type": "B",
+      "special": "See tear gas rules (p. 280)."
+    },
+    {
+      "type": "Concussive",
+      "damage": "6d10",
+      "damage_type": "B",
+      "special": "Full damage within 3m; half damage between 3-6m from ground zero."
+    },
+    {
+      "type": "Flash",
+      "damage": "2d10",
+      "damage_type": "B",
+      "special": "Blinds target (as Strobe 2)."
+    },
+    {
+      "type": "White Phosphorus",
+      "damage": "8d10",
+      "damage_type": "L",
+      "special": "Continuous damage, halved every turn after the first."
+    },
+    {
+      "type": "Chaff",
+      "damage": "0",
+      "damage_type": null,
+      "special": "Disrupts electronic sensors (as Cyberkinesis 1)."
+    }
+  ],
+  "armor": [
+    {
+      "class": "Reinforced Clothing",
+      "soak_bashing": 0,
+      "soak_lethal": 2,
+      "protection": "Full Body",
+      "penalty": 0,
+      "conceal": "*",
+      "cost_dots": 2,
+      "destruction": 8
+    },
+    {
+      "class": "Armored T-shirt",
+      "soak_bashing": 2,
+      "soak_lethal": 1,
+      "protection": "Torso",
+      "penalty": 0,
+      "conceal": "J",
+      "cost_dots": 2,
+      "destruction": 8
+    },
+    {
+      "class": "Kevlar Vest",
+      "soak_bashing": 2,
+      "soak_lethal": 3,
+      "protection": "Torso",
+      "penalty": 1,
+      "conceal": "T",
+      "cost_dots": 3,
+      "destruction": 10
+    },
+    {
+      "class": "Flak Jacket",
+      "soak_bashing": 4,
+      "soak_lethal": 4,
+      "protection": "Torso, arms",
+      "penalty": 1,
+      "conceal": "N",
+      "cost_dots": 3,
+      "destruction": 12
+    },
+    {
+      "class": "Full Riot Gear",
+      "soak_bashing": 5,
+      "soak_lethal": 5,
+      "protection": "Full Body",
+      "penalty": 2,
+      "conceal": "N",
+      "cost_dots": 4,
+      "destruction": 12
+    },
+    {
+      "class": "Bomb Squad Armor",
+      "soak_bashing": 6,
+      "soak_lethal": 5,
+      "protection": "Full Body",
+      "penalty": 2,
+      "conceal": "N",
+      "cost_dots": 4,
+      "destruction": 13
+    },
+    {
+      "class": "Advanced Body Armor",
+      "soak_bashing": 6,
+      "soak_lethal": 6,
+      "protection": "Full Body",
+      "penalty": 2,
+      "conceal": "N",
+      "cost_dots": 5,
+      "destruction": 15
+    }
+  ]
 }

@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog
+from tkinter import font as tkfont
 import json
 import os
 import re
@@ -211,6 +212,49 @@ def _configure_dice_tags(tw):
 
 # ─── Character Sheet Frame ────────────────────────────────────────────────────
 class CharacterFrame(tk.Frame):
+    # ── Equipment column specs (label, field_key, char_width) ─────────────────
+    _WPN_COLS = {
+        "melee": [
+            ("DAMAGE", "damage",       10),
+            ("B/L",    "damage_type",   3),
+            ("STR",    "str_range",     9),
+            ("CONC",   "conceal",       4),
+            ("COST",   "cost_dots",     4),
+        ],
+        "ranged": [
+            ("DAMAGE", "damage",        9),
+            ("B/L",    "damage_type",   3),
+            ("ACC",    "accuracy",      4),
+            ("RNG(m)", "range_m",       6),
+            ("ROF",    "rof",           4),
+            ("CLIP",   "clip",          5),
+            ("CONC",   "conceal",       4),
+            ("COST",   "cost_dots",     4),
+        ],
+        "heavy": [
+            ("DAMAGE", "damage",        9),
+            ("AUTO",   "auto_damage",   5),
+            ("B/L",    "damage_type",   3),
+            ("ACC",    "accuracy",      4),
+            ("RNG(m)", "range_m",       7),
+            ("ROF",    "rof",           4),
+            ("CAP",    "capacity",      4),
+            ("COST",   "cost_dots",     4),
+        ],
+        "grenades": [
+            ("DAMAGE", "damage",        9),
+            ("B/L",    "damage_type",   3),
+        ],  # SPECIAL handled separately (expands)
+    }
+    _ARMOR_COLS = [
+        ("SOAK B",  "soak_bashing",  6),
+        ("SOAK L",  "soak_lethal",   6),
+        ("PROTECT", "protection",   12),
+        ("PENALTY", "penalty",       7),
+        ("CONCEAL", "conceal",       6),
+        ("COST",    "cost_dots",     4),
+        ("DEST",    "destruction",   4),
+    ]
     def __init__(self, parent, cfg, on_title_change=None):
         super().__init__(parent, bg=BG_DARK)
         self.cfg = cfg
@@ -285,6 +329,7 @@ class CharacterFrame(tk.Frame):
             ("ATTRIBUTES\n& ABILITIES", "attrs"),
             ("ADVANTAGES",              "advs"),
             ("COMBAT",                  "combat"),
+            ("EQUIPMENT",              "equip"),
             ("QUANTUM\nPOWERS",        "powers"),
             ("GAME NOTES",             "notes"),
             ("PORTRAIT",               "portrait"),
@@ -324,6 +369,7 @@ class CharacterFrame(tk.Frame):
         self._tab_frames["attrs"]   = self._build_attrs_tab(self._center)
         self._tab_frames["advs"]    = self._build_advs_tab(self._center)
         self._tab_frames["combat"]  = self._build_combat_tab(self._center)
+        self._tab_frames["equip"]   = self._build_equipment_tab(self._center)
         self._tab_frames["powers"]  = self._build_powers_tab(self._center)
         self._tab_frames["notes"]   = self._build_notes_tab(self._center)
         self._tab_frames["portrait"] = self._build_portrait_tab(self._center)
@@ -613,6 +659,8 @@ class CharacterFrame(tk.Frame):
         val_var  = tk.IntVar(value=val)
         name_var.trace_add("write", lambda *_: self._mark_dirty())
         val_var.trace_add("write",  lambda *_: self._mark_dirty())
+        name_var.trace_add("write", self._sync_eufiber_armor)
+        val_var.trace_add("write",  self._sync_eufiber_armor)
 
         row = tk.Frame(self._bg_container, bg=BG_CARD)
         row.pack(fill="x", pady=1)
@@ -907,7 +955,8 @@ class CharacterFrame(tk.Frame):
                 return
             p = self._powers_by_id[pid]
             win.destroy()
-            if p.get("Variants") or p.get("AllowCustomVariant"):
+            if (p.get("Variants") or p.get("AllowCustomVariant")
+                    or p.get("BroadCategoryVariants") or p.get("QuantumPowerVariant")):
                 self._show_variant_picker(p, on_chosen=lambda v: self._add_power_card(pid, variant=v))
             else:
                 self._add_power_card(pid)
@@ -920,22 +969,37 @@ class CharacterFrame(tk.Frame):
     def _show_variant_picker(self, power_data, on_chosen):
         pid = power_data["PowerID"]
         already_used = {e.get("variant") or "" for e in self._power_cards if e["power_id"] == pid}
-        remaining = [v for v in power_data.get("Variants", []) if v not in already_used]
-        allow_custom = power_data.get("AllowCustomVariant", False)
+        remaining    = [v for v in power_data.get("Variants", []) if v not in already_used]
+        broad_cat    = [v for v in power_data.get("BroadCategoryVariants", []) if v not in already_used]
+        allow_custom  = power_data.get("AllowCustomVariant", False)
+        allow_quantum = power_data.get("QuantumPowerVariant", False)
 
-        if not remaining and not allow_custom:
+        # items: list of (display_label, internal_key)
+        # internal_key == "_custom_"  → free-text entry
+        # internal_key == "_quantum_" → opens power sub-picker
+        items = []
+        for v in remaining:
+            items.append((v, v))
+        for v in broad_cat:
+            items.append((f"{v}  *", v))
+        if allow_quantum:
+            items.append(("Quantum power  *", "_quantum_"))
+        if allow_custom:
+            items.append(("Custom…", "_custom_"))
+
+        if not items:
             return
 
-        display_items = list(remaining)
-        if allow_custom:
-            display_items.append("Custom…")
+        has_broad = bool(broad_cat) or allow_quantum
+        display_labels   = [d for d, _ in items]
+        internal_keys    = [k for _, k in items]
 
         win = tk.Toplevel(self, bg=BG_DARK)
         win.title(f"Choose — {power_data['PowerName']}")
         win.resizable(False, False)
         win.grab_set()
 
-        tk.Label(win, text=f"Choose the form for\n{power_data['PowerName']}:",
+        tk.Label(win, text=f"Choose the type for\n{power_data['PowerName']}:",
                  font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT,
                  justify="center").pack(pady=(12, 6), padx=16)
 
@@ -943,12 +1007,17 @@ class CharacterFrame(tk.Frame):
         frm.pack(padx=12, pady=(0, 4))
         lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
                         selectforeground="white", font=("Arial", 10), activestyle="none",
-                        relief="flat", width=22, height=min(len(display_items), 12))
+                        relief="flat", width=26, height=min(len(display_labels), 14))
         lb.pack()
-        for v in display_items:
-            lb.insert("end", f"  {v}")
+        for lbl in display_labels:
+            lb.insert("end", f"  {lbl}")
         lb.selection_set(0)
 
+        if has_broad:
+            tk.Label(win, text="* Broad Category extra required",
+                     font=("Arial", 8), bg=BG_DARK, fg=TEXT_DIM).pack(pady=(0, 2))
+
+        # Custom entry row (shown only when "Custom…" is selected)
         custom_frame = tk.Frame(win, bg=BG_DARK)
         tk.Label(custom_frame, text="Form name:", font=("Arial", 8),
                  bg=BG_DARK, fg=TEXT_DIM).pack(side="left")
@@ -958,32 +1027,93 @@ class CharacterFrame(tk.Frame):
                                 relief="flat", width=16)
         custom_entry.pack(side="left", padx=(4, 0))
 
-        def _sync_custom(*_):
+        def _sync_ui(*_):
             sel = lb.curselection()
-            is_custom = bool(sel) and display_items[sel[0]] == "Custom…"
+            is_custom = bool(sel) and internal_keys[sel[0]] == "_custom_"
             if is_custom:
                 custom_frame.pack(padx=12, pady=(2, 0), fill="x")
                 custom_entry.focus_set()
             else:
                 custom_frame.pack_forget()
             win.update_idletasks()
-            win.geometry(f"260x{win.winfo_reqheight()}")
+            win.geometry(f"280x{win.winfo_reqheight()}")
 
-        lb.bind("<<ListboxSelect>>", _sync_custom)
+        lb.bind("<<ListboxSelect>>", _sync_ui)
+
+        def _open_quantum_picker():
+            """Second-stage picker: choose which quantum power."""
+            already_quantum = {
+                v.replace("Quantum power: ", "")
+                for v in already_used if v.startswith("Quantum power: ")
+            }
+            all_names = sorted(
+                p["PowerName"] for p in self._all_powers
+                if p["PowerID"] != pid and p.get("isDefensible", False)
+                and p["PowerName"] not in already_quantum
+            )
+            if not all_names:
+                return
+
+            sub = tk.Toplevel(self, bg=BG_DARK)
+            sub.title(f"Choose Power — {power_data['PowerName']}")
+            sub.resizable(False, False)
+            sub.grab_set()
+
+            tk.Label(sub, text=f"{power_data['PowerName']}:\nwhich quantum power?",
+                     font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT,
+                     justify="center").pack(pady=(12, 6), padx=16)
+
+            sf = tk.Frame(sub, bg=BG_DARK)
+            sf.pack(padx=12, pady=(0, 4))
+            vsb = tk.Scrollbar(sf, orient="vertical")
+            slb = tk.Listbox(sf, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
+                             selectforeground="white", font=("Arial", 10), activestyle="none",
+                             relief="flat", width=28, height=min(len(all_names), 16),
+                             yscrollcommand=vsb.set)
+            vsb.config(command=slb.yview)
+            slb.pack(side="left", fill="both", expand=True)
+            vsb.pack(side="left", fill="y")
+            for n in all_names:
+                slb.insert("end", f"  {n}")
+            slb.selection_set(0)
+
+            def _sub_confirm():
+                sel = slb.curselection()
+                if not sel:
+                    return
+                sub.destroy()
+                on_chosen(f"Quantum power: {all_names[sel[0]]}")
+
+            slb.bind("<Double-Button-1>", lambda e: _sub_confirm())
+            sub.bind("<Escape>", lambda e: sub.destroy())
+
+            btn_row = tk.Frame(sub, bg=BG_DARK)
+            btn_row.pack(pady=(4, 12))
+            tk.Button(btn_row, text="Choose", command=_sub_confirm, bg=ACCENT, fg="white",
+                      font=("Arial", 9, "bold"), relief="flat", padx=12).pack(side="left", padx=4)
+            tk.Button(btn_row, text="Cancel", command=sub.destroy, bg=BG_MID, fg=TEXT_MAIN,
+                      font=("Arial", 9), relief="flat", padx=12).pack(side="left", padx=4)
+            sub.update_idletasks()
+            sub.geometry(f"280x{sub.winfo_reqheight()}")
 
         def _confirm():
             sel = lb.curselection()
             if not sel:
                 return
-            if display_items[sel[0]] == "Custom…":
+            key = internal_keys[sel[0]]
+            if key == "_custom_":
                 chosen = custom_var.get().strip()
                 if not chosen:
                     custom_entry.focus_set()
                     return
+                win.destroy()
+                on_chosen(chosen)
+            elif key == "_quantum_":
+                win.destroy()
+                _open_quantum_picker()
             else:
-                chosen = display_items[sel[0]]
-            win.destroy()
-            on_chosen(chosen)
+                win.destroy()
+                on_chosen(key)
 
         lb.bind("<Double-Button-1>", lambda e: _confirm())
         custom_entry.bind("<Return>", lambda e: _confirm())
@@ -997,7 +1127,7 @@ class CharacterFrame(tk.Frame):
                   font=("Arial", 9), relief="flat", padx=12).pack(side="left", padx=4)
 
         win.update_idletasks()
-        win.geometry(f"260x{win.winfo_reqheight()}")
+        win.geometry(f"280x{win.winfo_reqheight()}")
 
     def _add_cost_row(self, parent, power_data, bg, prof_var=None):
         """Add a Cost: line. prof_var makes it live (learned = level, unlearned = 2×level)."""
@@ -1884,51 +2014,77 @@ class CharacterFrame(tk.Frame):
         sf = ScrollFrame(parent, bg=BG_DARK)
         inner = sf.inner
 
-        section_label(inner, "ATTACK")
-        atk_frame = card(inner)
-        atk_frame.pack(fill="x", padx=4, pady=4)
+        atk_hdr = tk.Frame(inner, bg=ACCENT, pady=1)
+        atk_hdr.pack(fill="x", pady=(8, 0))
+        tk.Label(atk_hdr, text="ATTACK", font=("Arial", 9, "bold"),
+                 bg=ACCENT, fg="white").pack(side="left", padx=4, pady=2)
+        add_atk_btn = tk.Label(atk_hdr, text="+ Add Attack",
+                               font=("Arial", 8, "bold"), bg=ACCENT, fg="white",
+                               cursor="hand2")
+        add_atk_btn.pack(side="right", padx=6, pady=2)
+        add_atk_btn.bind("<Button-1>", self._show_attack_picker)
 
-        headers = ["Name", "ACC", "DMG", "ROF", "FT"]
-        widths   = [18, 5, 6, 5, 5]
-        for c, (h, w) in enumerate(zip(headers, widths)):
-            tk.Label(atk_frame, text=h, font=("Arial", 8, "bold"),
-                     bg=BG_CARD, fg=GOLD, width=w).grid(row=0, column=c, padx=2, pady=2)
+        atk_card = card(inner)
+        atk_card.pack(fill="x", padx=4, pady=(0, 4))
 
-        self._attack_vars = []
-        for r in range(self.cfg["num_attack_rows"]):
-            row_vars = {}
-            for c, (key, w) in enumerate(zip(["name", "acc", "dmg", "rof", "ft"], widths)):
-                v = tk.StringVar()
-                v.trace_add("write", lambda *_: self._mark_dirty())
-                row_vars[key] = v
-                e = tk.Entry(atk_frame, textvariable=v, font=("Arial", 8),
-                             bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
-                             relief="flat", width=w)
-                e.grid(row=r + 1, column=c, padx=2, pady=1)
-            self._attack_vars.append(row_vars)
+        # Column header row — pack right-side cols first so pool expands
+        col_hdr = tk.Frame(atk_card, bg=BG_CARD)
+        col_hdr.pack(fill="x", padx=2, pady=(2, 0))
+        tk.Label(col_hdr, text=" ", font=("Arial", 7), bg=BG_CARD,
+                 width=2).pack(side="right")
+        tk.Label(col_hdr, text="DIFF", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=6, anchor="center").pack(side="right")
+        tk.Label(col_hdr, text="ACC", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=6, anchor="center").pack(side="right")
+        tk.Label(col_hdr, text="DMG", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=6, anchor="center").pack(side="right")
+        tk.Label(col_hdr, text="MANEUVER", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=16, anchor="w").pack(side="left", padx=(2, 0))
+        tk.Label(col_hdr, text="POOL", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, anchor="w").pack(side="left", padx=(4, 0),
+                                                        fill="x", expand=True)
+        tk.Frame(atk_card, bg=BORDER, height=1).pack(fill="x")
 
-        section_label(inner, "ARMOR")
-        arm_frame = card(inner)
-        arm_frame.pack(fill="x", padx=4, pady=4)
+        self._attack_container = tk.Frame(atk_card, bg=BG_CARD)
+        self._attack_container.pack(fill="x")
+        self._attack_cards = []
 
-        arm_headers = ["Name", "B", "L", "BULK", "FT"]
-        arm_widths   = [18, 5, 5, 6, 5]
-        for c, (h, w) in enumerate(zip(arm_headers, arm_widths)):
-            tk.Label(arm_frame, text=h, font=("Arial", 8, "bold"),
-                     bg=BG_CARD, fg=GOLD, width=w).grid(row=0, column=c, padx=2, pady=2)
+        wpn_sub = tk.Frame(atk_card, bg=BG_PANEL)
+        wpn_sub.pack(fill="x")
+        tk.Label(wpn_sub, text="WEAPONS", font=("Arial", 7, "bold"),
+                 bg=BG_PANEL, fg=TEXT_DIM).pack(side="left", padx=4, pady=1)
 
-        self._armor_vars = []
-        for r in range(self.cfg["num_armor_rows"]):
-            row_vars = {}
-            for c, (key, w) in enumerate(zip(["name", "b", "l", "bulk", "ft"], arm_widths)):
-                v = tk.StringVar()
-                v.trace_add("write", lambda *_: self._mark_dirty())
-                row_vars[key] = v
-                e = tk.Entry(arm_frame, textvariable=v, font=("Arial", 8),
-                             bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
-                             relief="flat", width=w)
-                e.grid(row=r + 1, column=c, padx=2, pady=1)
-            self._armor_vars.append(row_vars)
+        self._weapon_atk_container = tk.Frame(atk_card, bg=BG_CARD)
+        self._weapon_atk_container.pack(fill="x")
+        self._weapon_atk_traces = []
+
+        arm_hdr = tk.Frame(inner, bg=ACCENT, pady=1)
+        arm_hdr.pack(fill="x", pady=(8, 0))
+        tk.Label(arm_hdr, text="ARMOR", font=("Arial", 9, "bold"),
+                 bg=ACCENT, fg="white").pack(side="left", padx=4, pady=2)
+
+        arm_card = card(inner)
+        arm_card.pack(fill="x", padx=4, pady=(0, 4))
+
+        arm_col_hdr = tk.Frame(arm_card, bg=BG_CARD)
+        arm_col_hdr.pack(fill="x", padx=2, pady=(2, 0))
+        tk.Label(arm_col_hdr, text="PENALTY", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=8, anchor="center").pack(side="right")
+        tk.Label(arm_col_hdr, text="PROTECT", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=9, anchor="center").pack(side="right")
+        tk.Label(arm_col_hdr, text="SOAK L", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=7, anchor="center").pack(side="right")
+        tk.Label(arm_col_hdr, text="SOAK B", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=7, anchor="center").pack(side="right")
+        tk.Label(arm_col_hdr, text="EQUIP", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=6, anchor="center").pack(side="right")
+        tk.Label(arm_col_hdr, text="NAME", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, anchor="w").pack(side="left", padx=(2, 0),
+                                                        fill="x", expand=True)
+        tk.Frame(arm_card, bg=BORDER, height=1).pack(fill="x")
+
+        self._combat_armor_container = tk.Frame(arm_card, bg=BG_CARD)
+        self._combat_armor_container.pack(fill="x")
 
         ims = tk.Frame(inner, bg=BG_DARK)
         ims.pack(fill="x", padx=4, pady=4)
@@ -1980,6 +2136,1074 @@ class CharacterFrame(tk.Frame):
                      relief="flat", width=6).pack(side="left", padx=2, pady=4)
 
         return sf
+
+    # ── Combat helpers ────────────────────────────────────────────────────────
+    def _find_maneuver(self, name):
+        for group in self.cfg.get("combat_maneuvers", {}).values():
+            for m in group:
+                if m["name"] == name:
+                    return m
+        return None
+
+    def _find_ability_parent(self, ability_name):
+        """Return (ATTR_NAME, attr_var, mega_var) for a standard ability, else None."""
+        for attr, abilities in self.cfg["abilities"].items():
+            if ability_name in abilities:
+                mega_key = "Mega-" + attr.capitalize()
+                return (attr,
+                        self._attr_vars.get(attr),
+                        self._mega_vars.get(mega_key))
+        return None
+
+    def _show_attack_picker(self, event=None):
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Add Attack")
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="Choose a Combat Maneuver:",
+                 font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT).pack(pady=(12, 6), padx=16)
+
+        maneuvers = self.cfg.get("combat_maneuvers", {})
+        group_labels = [
+            ("close_combat",  "Close Combat"),
+            ("special_nova",  "Special / Nova"),
+            ("ranged_combat", "Ranged Combat"),
+        ]
+
+        frm = tk.Frame(win, bg=BG_DARK)
+        frm.pack(padx=12, pady=(0, 4))
+        lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
+                        selectforeground="white", font=("Arial", 10), activestyle="none",
+                        relief="flat", width=28, height=20)
+        lb.pack(side="left", fill="y")
+        vsb = tk.Scrollbar(frm, command=lb.yview)
+        vsb.pack(side="right", fill="y")
+        lb.config(yscrollcommand=vsb.set)
+
+        header_indices = set()
+        item_map = {}
+        for group_key, group_label in group_labels:
+            idx = lb.size()
+            lb.insert("end", f"  ── {group_label} ──")
+            lb.itemconfig(idx, fg=GOLD, selectbackground=BG_MID, selectforeground=GOLD)
+            header_indices.add(idx)
+            for m in maneuvers.get(group_key, []):
+                i = lb.size()
+                lb.insert("end", f"    {m['name']}")
+                item_map[i] = m["name"]
+
+        def _on_sel(e=None):
+            sel = lb.curselection()
+            if sel and sel[0] in header_indices:
+                lb.selection_clear(0, "end")
+
+        lb.bind("<<ListboxSelect>>", _on_sel)
+        for i in sorted(item_map):
+            lb.selection_set(i)
+            break
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(4, 12))
+
+        def _do_add():
+            sel = lb.curselection()
+            if not sel or sel[0] in header_indices:
+                return
+            self._add_attack_card(item_map[sel[0]])
+            win.destroy()
+
+        tk.Button(btn_row, text="Add", font=("Arial", 9, "bold"),
+                  bg=ACCENT, fg="white", relief="flat", cursor="hand2",
+                  command=_do_add).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", font=("Arial", 9),
+                  bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                  command=win.destroy).pack(side="left", padx=4)
+
+    def _add_attack_card(self, maneuver_name):
+        m = self._find_maneuver(maneuver_name)
+        if m is None:
+            return
+
+        is_power_block = (maneuver_name == "Power Block")
+        abilities  = m.get("ability", [])
+        acc        = m.get("accuracy",   "Normal")
+        diff       = m.get("difficulty", "Normal")
+        damage_str = m.get("damage", "0")
+
+        traces = []
+
+        sep = tk.Frame(self._attack_container, bg=BORDER, height=1)
+        sep.pack(fill="x")
+
+        row_frame = tk.Frame(self._attack_container, bg=BG_CARD)
+        row_frame.pack(fill="x", padx=2, pady=2)
+
+        # ── Right-side columns (pack first so pool section can expand) ───────
+        right = tk.Frame(row_frame, bg=BG_CARD)
+        right.pack(side="right")
+
+        x_lbl = tk.Label(right, text="×", font=("Arial", 9, "bold"),
+                         bg=BG_CARD, fg=TEXT_DIM, cursor="hand2", width=2)
+        x_lbl.pack(side="right")
+
+        diff_text  = diff if diff not in ("Normal", "N/A") else "—"
+        diff_color = TEXT_MAIN if diff not in ("Normal", "N/A") else TEXT_DIM
+        tk.Label(right, text=diff_text, font=("Arial", 8),
+                 bg=BG_CARD, fg=diff_color,
+                 width=6, anchor="center").pack(side="right")
+
+        acc_text  = acc if acc not in ("Normal", "N/A") else "—"
+        acc_color = TEXT_MAIN if acc not in ("Normal", "N/A") else TEXT_DIM
+        tk.Label(right, text=acc_text, font=("Arial", 8),
+                 bg=BG_CARD, fg=acc_color,
+                 width=6, anchor="center").pack(side="right")
+
+        # Damage column
+        dmg_frame = tk.Frame(right, bg=BG_CARD, width=56)
+        dmg_frame.pack(side="right")
+        dmg_frame.pack_propagate(False)
+
+        dmg_match = re.match(r'(?i)(strength|dexterity|stamina)\s*\+(\d+)$', damage_str.strip())
+        if dmg_match:
+            attr_name   = dmg_match.group(1).upper()
+            bonus       = int(dmg_match.group(2))
+            dmg_attr_var = self._attr_vars.get(attr_name)
+            mega_key    = "Mega-" + attr_name.capitalize()
+            dmg_mega_var = self._mega_vars.get(mega_key)
+            if dmg_attr_var:
+                dmg_sv      = tk.StringVar()
+                dmg_mega_sv = tk.StringVar()
+                def _upd_dmg(*_, _av=dmg_attr_var, _mv=dmg_mega_var, _b=bonus,
+                             _ds=dmg_sv, _ms=dmg_mega_sv):
+                    base   = _av.get() + _b
+                    mbonus = (_mv.get() if _mv else 0) * 3
+                    _ds.set(str(base + mbonus))
+                    _ms.set(f"(+{mbonus})" if mbonus > 0 else "")
+                traces.append((dmg_attr_var, dmg_attr_var.trace_add("write", _upd_dmg)))
+                if dmg_mega_var:
+                    traces.append((dmg_mega_var, dmg_mega_var.trace_add("write", _upd_dmg)))
+                _upd_dmg()
+                tk.Label(dmg_frame, textvariable=dmg_sv, font=("Arial", 9, "bold"),
+                         bg=BG_CARD, fg=TEXT_MAIN,
+                         anchor="center").pack(fill="x", expand=True)
+                tk.Label(dmg_frame, textvariable=dmg_mega_sv, font=("Arial", 7),
+                         bg=BG_CARD, fg=_MEGA_COLOR,
+                         anchor="center").pack(fill="x")
+            else:
+                tk.Label(dmg_frame, text=damage_str, font=("Arial", 8),
+                         bg=BG_CARD, fg=TEXT_MAIN,
+                         anchor="center").pack(fill="x", expand=True)
+        else:
+            tk.Label(dmg_frame, text=damage_str, font=("Arial", 8),
+                     bg=BG_CARD, fg=TEXT_MAIN,
+                     anchor="center").pack(fill="x", expand=True)
+
+        # ── Maneuver name (left, fixed width) ─────────────────────────────────
+        tk.Label(row_frame, text=maneuver_name, font=("Arial", 9, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=16, anchor="w").pack(side="left")
+
+        # ── Pool section (expands to fill remaining space) ────────────────────
+        pool_section = tk.Frame(row_frame, bg=BG_CARD)
+        pool_section.pack(side="left", fill="x", expand=True)
+
+        for ability in abilities:
+            pool_row = tk.Frame(pool_section, bg=BG_CARD)
+            pool_row.pack(fill="x")
+
+            if is_power_block:
+                tk.Label(pool_row, text="Special — see power", font=("Arial", 8),
+                         bg=BG_CARD, fg=TEXT_DIM).pack(side="left")
+                continue
+
+            num_sv   = tk.StringVar()
+            mega_sv  = tk.StringVar()
+            break_sv = tk.StringVar()
+
+            parent = self._find_ability_parent(ability)
+            if parent:
+                attr_name, attr_var, mega_var = parent
+                ability_var = self._ability_vars.get(ability)
+
+                def _upd(*_, _av=attr_var, _bv=ability_var, _mv=mega_var,
+                         _ns=num_sv, _ms=mega_sv, _bs=break_sv,
+                         _an=attr_name, _ab=ability):
+                    av = _av.get() if _av else 0
+                    bv = _bv.get() if _bv else 0
+                    mv = _mv.get() if _mv else 0
+                    _ns.set(str(av + bv))
+                    _ms.set(f" ({mv})" if mv > 0 else "")
+                    _bs.set(f"  {_an.capitalize()} {av} + {_ab} {bv}")
+
+                if attr_var:    traces.append((attr_var,    attr_var.trace_add("write", _upd)))
+                if ability_var: traces.append((ability_var, ability_var.trace_add("write", _upd)))
+                if mega_var:    traces.append((mega_var,    mega_var.trace_add("write", _upd)))
+                _upd()
+            else:
+                dex_var  = self._attr_vars.get("DEXTERITY")
+                mdex_var = self._mega_vars.get("Mega-Dexterity")
+                pc = next(
+                    (c for c in self._power_cards
+                     if self._powers_by_id.get(c["power_id"], {})
+                            .get("PowerName", "").lower() == ability.lower()),
+                    None)
+
+                def _upd(*_, _dv=dex_var, _mv=mdex_var, _pc=pc,
+                         _ns=num_sv, _ms=mega_sv, _bs=break_sv, _ab=ability):
+                    dv = _dv.get() if _dv else 0
+                    rv = _pc["rating_var"].get() if _pc else 0
+                    mv = _mv.get() if _mv else 0
+                    if _pc:
+                        _ns.set(str(dv + rv))
+                        _ms.set(f" ({mv})" if mv > 0 else "")
+                        _bs.set(f"  Dexterity {dv} + {_ab} {rv}")
+                    else:
+                        _ns.set("—")
+                        _ms.set("")
+                        _bs.set("  (power not owned)")
+
+                if dex_var:  traces.append((dex_var,  dex_var.trace_add("write",  _upd)))
+                if mdex_var: traces.append((mdex_var, mdex_var.trace_add("write", _upd)))
+                if pc:
+                    rv = pc["rating_var"]
+                    traces.append((rv, rv.trace_add("write", _upd)))
+                _upd()
+
+            pool_num = tk.Label(pool_row, textvariable=num_sv,
+                     font=tkfont.Font(family="Arial", size=9, weight="bold", underline=True),
+                     bg=BG_CARD, fg=_DICE_COLOR, width=4, anchor="e", cursor="hand2")
+            pool_num.pack(side="left")
+            pool_num.bind("<Button-1>", lambda e: None)  # future dice roller hook
+            tk.Label(pool_row, textvariable=mega_sv, font=("Arial", 8),
+                     bg=BG_CARD, fg=_MEGA_COLOR).pack(side="left")
+            tk.Label(pool_row, textvariable=break_sv, font=("Arial", 8),
+                     bg=BG_CARD, fg=TEXT_DIM).pack(side="left")
+
+        entry = {"maneuver": maneuver_name, "frame": row_frame, "sep": sep, "traces": traces}
+        self._attack_cards.append(entry)
+
+        def _remove(e=entry, f=row_frame, s=sep):
+            for var, tid in e.get("traces", []):
+                try:
+                    var.trace_remove("write", tid)
+                except Exception:
+                    pass
+            self._attack_cards = [c for c in self._attack_cards if c is not e]
+            self.after(0, f.destroy)
+            self.after(0, s.destroy)
+            self._mark_dirty()
+
+        x_lbl.bind("<Button-1>", lambda ev, fn=_remove: self.after(0, fn))
+        self._mark_dirty()
+
+    # ── EQUIPMENT tab ────────────────────────────────────────────────────────
+    def _build_equipment_tab(self, parent):
+        sf = ScrollFrame(parent, bg=BG_DARK)
+        inner = sf.inner
+
+        self._equip_weapons = []
+        self._equip_armor   = []
+        self._equip_misc    = []
+
+        self._build_equip_weapons_zone(inner)
+        self._build_equip_armor_zone(inner)
+        self._build_equip_misc_zone(inner)
+
+        return sf
+
+    def _build_equip_weapons_zone(self, parent):
+        hdr = tk.Frame(parent, bg=ACCENT)
+        hdr.pack(fill="x", pady=(8, 0))
+        tk.Label(hdr, text="WEAPONS", font=("Arial", 9, "bold"),
+                 bg=ACCENT, fg="white").pack(side="left", padx=4, pady=2)
+        add_btn = tk.Label(hdr, text="+ Add Weapon", font=("Arial", 8, "bold"),
+                           bg=ACCENT, fg="white", cursor="hand2")
+        add_btn.pack(side="right", padx=6, pady=2)
+        add_btn.bind("<Button-1>", self._show_weapon_picker)
+
+        wcard = card(parent)
+        wcard.pack(fill="x", padx=4, pady=(0, 4))
+
+        self._weapon_row_containers = {}
+        cat_info = [
+            ("melee",    "MELEE"),
+            ("ranged",   "RANGED"),
+            ("heavy",    "HEAVY WEAPONS"),
+            ("grenades", "GRENADES"),
+        ]
+
+        for cat_key, cat_label in cat_info:
+            cols = self._WPN_COLS.get(cat_key, [])
+
+            sub_hdr = tk.Frame(wcard, bg=BG_PANEL)
+            sub_hdr.pack(fill="x")
+
+            # Right-side: × spacer + fixed stat col headers (right to left)
+            tk.Label(sub_hdr, text=" ", font=("Arial", 7), bg=BG_PANEL,
+                     width=2).pack(side="right")
+            for col_lbl, _, col_w in reversed(cols):
+                tk.Label(sub_hdr, text=col_lbl, font=("Arial", 7, "bold"),
+                         bg=BG_PANEL, fg=GOLD, width=col_w,
+                         anchor="center").pack(side="right")
+            if cat_key == "grenades":
+                tk.Label(sub_hdr, text="SPECIAL", font=("Arial", 7, "bold"),
+                         bg=BG_PANEL, fg=GOLD, anchor="w").pack(
+                             side="right", fill="x", expand=True, padx=(4, 0))
+
+            # Left: category label
+            tk.Label(sub_hdr, text=cat_label, font=("Arial", 8, "bold"),
+                     bg=BG_PANEL, fg=TEXT_MAIN, padx=6, pady=2).pack(side="left")
+            if cat_key == "grenades":
+                tk.Label(sub_hdr, text="NAME", font=("Arial", 7, "bold"),
+                         bg=BG_PANEL, fg=GOLD, width=14,
+                         anchor="w").pack(side="left", padx=(4, 0))
+            else:
+                tk.Label(sub_hdr, text="NAME", font=("Arial", 7, "bold"),
+                         bg=BG_PANEL, fg=GOLD, anchor="w").pack(
+                             side="left", fill="x", expand=True, padx=(4, 0))
+
+            tk.Frame(wcard, bg=BORDER, height=1).pack(fill="x")
+            rc = tk.Frame(wcard, bg=BG_CARD)
+            rc.pack(fill="x")
+            self._weapon_row_containers[cat_key] = rc
+
+            if cat_key != "grenades":
+                tk.Frame(wcard, bg=BG_PANEL, height=2).pack(fill="x")
+
+    def _build_equip_armor_zone(self, parent):
+        hdr = tk.Frame(parent, bg=ACCENT)
+        hdr.pack(fill="x", pady=(8, 0))
+        tk.Label(hdr, text="ARMOR", font=("Arial", 9, "bold"),
+                 bg=ACCENT, fg="white").pack(side="left", padx=4, pady=2)
+        add_btn = tk.Label(hdr, text="+ Add Armor", font=("Arial", 8, "bold"),
+                           bg=ACCENT, fg="white", cursor="hand2")
+        add_btn.pack(side="right", padx=6, pady=2)
+        add_btn.bind("<Button-1>", self._show_armor_picker)
+
+        acard = card(parent)
+        acard.pack(fill="x", padx=4, pady=(0, 4))
+
+        col_hdr = tk.Frame(acard, bg=BG_CARD)
+        col_hdr.pack(fill="x", padx=2, pady=(2, 0))
+        tk.Label(col_hdr, text=" ", font=("Arial", 7), bg=BG_CARD,
+                 width=2).pack(side="right")
+        for col_lbl, _, col_w in reversed(self._ARMOR_COLS):
+            tk.Label(col_hdr, text=col_lbl, font=("Arial", 7, "bold"),
+                     bg=BG_CARD, fg=GOLD, width=col_w,
+                     anchor="center").pack(side="right")
+        tk.Label(col_hdr, text="NAME", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, anchor="w").pack(
+                     side="left", fill="x", expand=True, padx=(2, 0))
+        tk.Frame(acard, bg=BORDER, height=1).pack(fill="x")
+        self._armor_rows_container = tk.Frame(acard, bg=BG_CARD)
+        self._armor_rows_container.pack(fill="x")
+
+    def _build_equip_misc_zone(self, parent):
+        hdr = tk.Frame(parent, bg=ACCENT)
+        hdr.pack(fill="x", pady=(8, 0))
+        tk.Label(hdr, text="MISCELLANEOUS", font=("Arial", 9, "bold"),
+                 bg=ACCENT, fg="white").pack(side="left", padx=4, pady=2)
+        add_btn = tk.Label(hdr, text="+ Add Item", font=("Arial", 8, "bold"),
+                           bg=ACCENT, fg="white", cursor="hand2")
+        add_btn.pack(side="right", padx=6, pady=2)
+        add_btn.bind("<Button-1>", self._show_misc_add_dialog)
+
+        mcard = card(parent)
+        mcard.pack(fill="x", padx=4, pady=(0, 8))
+
+        col_hdr = tk.Frame(mcard, bg=BG_CARD)
+        col_hdr.pack(fill="x", padx=2, pady=(2, 0))
+        tk.Label(col_hdr, text=" ", font=("Arial", 7), bg=BG_CARD,
+                 width=2).pack(side="right")
+        tk.Label(col_hdr, text="COST", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=6, anchor="center").pack(side="right")
+        tk.Label(col_hdr, text="NAME", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, width=16, anchor="w").pack(side="left", padx=(2, 0))
+        tk.Label(col_hdr, text="NOTES", font=("Arial", 7, "bold"),
+                 bg=BG_CARD, fg=GOLD, anchor="w").pack(
+                     side="left", fill="x", expand=True, padx=(4, 0))
+        tk.Frame(mcard, bg=BORDER, height=1).pack(fill="x")
+        self._misc_rows_container = tk.Frame(mcard, bg=BG_CARD)
+        self._misc_rows_container.pack(fill="x")
+
+    # ── Equipment pickers ─────────────────────────────────────────────────────
+    def _show_weapon_picker(self, event=None, category=None):
+        if category is None:
+            win = tk.Toplevel(self, bg=BG_DARK)
+            win.title("Add Weapon")
+            win.resizable(False, False)
+            win.grab_set()
+            tk.Label(win, text="Weapon Category:", font=("Arial", 10, "bold"),
+                     bg=BG_DARK, fg=ACCENT).pack(pady=(12, 6), padx=16)
+            for key, label in [("melee", "Melee Weapons"), ("ranged", "Ranged Weapons"),
+                                ("heavy", "Heavy Weapons"), ("grenades", "Grenades")]:
+                tk.Button(win, text=label, font=("Arial", 10),
+                          bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                          width=22,
+                          command=lambda c=key, w=win: (
+                              w.destroy(),
+                              self.after(10, lambda c=c: self._show_weapon_picker(category=c))
+                          )).pack(pady=2, padx=16)
+            tk.Button(win, text="Cancel", font=("Arial", 9),
+                      bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                      command=win.destroy).pack(pady=(4, 12))
+            return
+
+        cfg_map = {"melee": "melee_weapons", "ranged": "ranged_weapons",
+                   "heavy": "heavy_weapons", "grenades": "grenades"}
+        lbl_map = {"melee": "Melee Weapons", "ranged": "Ranged Weapons",
+                   "heavy": "Heavy Weapons", "grenades": "Grenades"}
+        items = self.cfg.get(cfg_map[category], [])
+
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title(f"Add Weapon — {lbl_map[category]}")
+        win.resizable(False, False)
+        win.grab_set()
+        tk.Label(win, text=f"Choose {lbl_map[category]}:",
+                 font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT).pack(
+                     pady=(12, 6), padx=16)
+
+        frm = tk.Frame(win, bg=BG_DARK)
+        frm.pack(padx=12, pady=(0, 4))
+        lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
+                        selectforeground="white", font=("Arial", 10),
+                        activestyle="none", relief="flat", width=30, height=12)
+        lb.pack(side="left", fill="y")
+        vsb = tk.Scrollbar(frm, command=lb.yview)
+        vsb.pack(side="right", fill="y")
+        lb.config(yscrollcommand=vsb.set)
+        for item in items:
+            lb.insert("end", f"  {item['type']}")
+        lb.insert("end", "  ── Custom… ──")
+        lb.selection_set(0)
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(4, 12))
+
+        def _do_add():
+            sel = lb.curselection()
+            if not sel:
+                return
+            idx = sel[0]
+            if idx == len(items):
+                win.destroy()
+                self._show_custom_weapon_dialog(category)
+                return
+            d = dict(items[idx])
+            d["name"] = d.pop("type")
+            d["category"] = category
+            self._add_weapon_row(category, d)
+            win.destroy()
+
+        tk.Button(btn_row, text="Add", font=("Arial", 9, "bold"),
+                  bg=ACCENT, fg="white", relief="flat", cursor="hand2",
+                  command=_do_add).pack(side="left", padx=4)
+        tk.Button(btn_row, text="← Back", font=("Arial", 9),
+                  bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                  command=lambda: (
+                      win.destroy(),
+                      self.after(10, self._show_weapon_picker)
+                  )).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", font=("Arial", 9),
+                  bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                  command=win.destroy).pack(side="left", padx=4)
+        lb.bind("<Double-Button-1>", lambda e: _do_add())
+
+    def _show_custom_weapon_dialog(self, category):
+        field_specs = {
+            "melee": [
+                ("Name",               "name",        ""),
+                ("Damage",             "damage",      "Str+Xd10"),
+                ("Type (B/L)",         "damage_type", "B"),
+                ("Str Min",            "str_min",     "1"),
+                ("Str Max",            "str_max",     "5"),
+                ("Conceal (J/P/T/N/*)","conceal",     "J"),
+                ("Cost (dots)",        "cost_dots",   "1"),
+            ],
+            "ranged": [
+                ("Name",               "name",        ""),
+                ("Damage",             "damage",      "Xd10"),
+                ("Type (B/L)",         "damage_type", "L"),
+                ("Accuracy modifier",  "accuracy",    "0"),
+                ("Range (m)",          "range_m",     "50"),
+                ("ROF",                "rof",         "1"),
+                ("Clip",               "clip",        ""),
+                ("Conceal (J/P/T/N)","conceal",       "J"),
+                ("Cost (dots)",        "cost_dots",   "1"),
+            ],
+            "heavy": [
+                ("Name",               "name",        ""),
+                ("Damage",             "damage",      "Xd10"),
+                ("Auto Damage",        "auto_damage", ""),
+                ("Type (B/L)",         "damage_type", "L"),
+                ("Accuracy modifier",  "accuracy",    "0"),
+                ("Range (m)",          "range_m",     "100"),
+                ("ROF",                "rof",         "1"),
+                ("Capacity",           "capacity",    "1"),
+                ("Cost (dots)",        "cost_dots",   "3"),
+            ],
+            "grenades": [
+                ("Name",               "name",        ""),
+                ("Damage",             "damage",      "Xd10"),
+                ("Type (B/L)",         "damage_type", "L"),
+                ("Special",            "special",     ""),
+            ],
+        }
+        specs = field_specs.get(category, [])
+
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title(f"Custom {category.capitalize()} Weapon")
+        win.resizable(False, False)
+        win.grab_set()
+        tk.Label(win, text=f"Custom {category.capitalize()} Weapon",
+                 font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT).pack(
+                     pady=(12, 6), padx=16)
+
+        entries = {}
+        first_entry = None
+        for label, key, default in specs:
+            r = tk.Frame(win, bg=BG_DARK)
+            r.pack(fill="x", padx=16, pady=2)
+            tk.Label(r, text=label, font=("Arial", 9), bg=BG_DARK,
+                     fg=TEXT_DIM, width=22, anchor="w").pack(side="left")
+            var = tk.StringVar(value=default)
+            e = tk.Entry(r, textvariable=var, font=("Arial", 9),
+                         bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                         relief="flat", width=20)
+            e.pack(side="left")
+            entries[key] = var
+            if first_entry is None:
+                first_entry = e
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(8, 12))
+
+        def _do_add():
+            d = {k: v.get() for k, v in entries.items()}
+            if not d.get("name"):
+                d["name"] = f"Custom {category}"
+            d["category"] = category
+            self._add_weapon_row(category, d)
+            win.destroy()
+
+        tk.Button(btn_row, text="Add", font=("Arial", 9, "bold"),
+                  bg=ACCENT, fg="white", relief="flat", cursor="hand2",
+                  command=_do_add).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", font=("Arial", 9),
+                  bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                  command=win.destroy).pack(side="left", padx=4)
+        if first_entry:
+            win.after(50, first_entry.focus_set)
+
+    def _show_armor_picker(self, event=None):
+        items = self.cfg.get("armor", [])
+
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Add Armor")
+        win.resizable(False, False)
+        win.grab_set()
+        tk.Label(win, text="Choose Armor:", font=("Arial", 10, "bold"),
+                 bg=BG_DARK, fg=ACCENT).pack(pady=(12, 6), padx=16)
+
+        frm = tk.Frame(win, bg=BG_DARK)
+        frm.pack(padx=12, pady=(0, 4))
+        lb = tk.Listbox(frm, bg=BG_MID, fg=TEXT_MAIN, selectbackground=ACCENT,
+                        selectforeground="white", font=("Arial", 10),
+                        activestyle="none", relief="flat", width=30, height=10)
+        lb.pack(side="left", fill="y")
+        vsb = tk.Scrollbar(frm, command=lb.yview)
+        vsb.pack(side="right", fill="y")
+        lb.config(yscrollcommand=vsb.set)
+        for item in items:
+            lb.insert("end", f"  {item['class']}")
+        lb.insert("end", "  ── Custom… ──")
+        lb.selection_set(0)
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(4, 12))
+
+        def _do_add():
+            sel = lb.curselection()
+            if not sel:
+                return
+            if sel[0] == len(items):
+                win.destroy()
+                self._show_custom_armor_dialog()
+                return
+            d = dict(items[sel[0]])
+            d["name"] = d.pop("class")
+            self._add_armor_row(d)
+            win.destroy()
+
+        tk.Button(btn_row, text="Add", font=("Arial", 9, "bold"),
+                  bg=ACCENT, fg="white", relief="flat", cursor="hand2",
+                  command=_do_add).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", font=("Arial", 9),
+                  bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                  command=win.destroy).pack(side="left", padx=4)
+        lb.bind("<Double-Button-1>", lambda e: _do_add())
+
+    def _show_custom_armor_dialog(self):
+        specs = [
+            ("Name",                  "name",         ""),
+            ("Soak Bashing",          "soak_bashing", "0"),
+            ("Soak Lethal",           "soak_lethal",  "0"),
+            ("Protection Area",       "protection",   "Full Body"),
+            ("Dex Penalty",           "penalty",      "0"),
+            ("Conceal (J/P/T/N/*)",   "conceal",      "J"),
+            ("Cost (dots)",           "cost_dots",    "2"),
+            ("Destruction rating",    "destruction",  "8"),
+        ]
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Custom Armor")
+        win.resizable(False, False)
+        win.grab_set()
+        tk.Label(win, text="Custom Armor", font=("Arial", 10, "bold"),
+                 bg=BG_DARK, fg=ACCENT).pack(pady=(12, 6), padx=16)
+
+        entries = {}
+        first_entry = None
+        for label, key, default in specs:
+            r = tk.Frame(win, bg=BG_DARK)
+            r.pack(fill="x", padx=16, pady=2)
+            tk.Label(r, text=label, font=("Arial", 9), bg=BG_DARK,
+                     fg=TEXT_DIM, width=24, anchor="w").pack(side="left")
+            var = tk.StringVar(value=default)
+            e = tk.Entry(r, textvariable=var, font=("Arial", 9),
+                         bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                         relief="flat", width=20)
+            e.pack(side="left")
+            entries[key] = var
+            if first_entry is None:
+                first_entry = e
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(8, 12))
+
+        def _do_add():
+            d = {k: v.get() for k, v in entries.items()}
+            if not d.get("name"):
+                d["name"] = "Custom Armor"
+            self._add_armor_row(d)
+            win.destroy()
+
+        tk.Button(btn_row, text="Add", font=("Arial", 9, "bold"),
+                  bg=ACCENT, fg="white", relief="flat", cursor="hand2",
+                  command=_do_add).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", font=("Arial", 9),
+                  bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                  command=win.destroy).pack(side="left", padx=4)
+        if first_entry:
+            win.after(50, first_entry.focus_set)
+
+    def _show_misc_add_dialog(self, event=None):
+        win = tk.Toplevel(self, bg=BG_DARK)
+        win.title("Add Item")
+        win.resizable(False, False)
+        win.grab_set()
+        tk.Label(win, text="Add Miscellaneous Item",
+                 font=("Arial", 10, "bold"), bg=BG_DARK, fg=ACCENT).pack(
+                     pady=(12, 6), padx=16)
+
+        entries = {}
+        first_entry = None
+        for label, key, default, w in [
+            ("Name",  "name",  "", 28),
+            ("Notes", "notes", "", 28),
+            ("Cost",  "cost",  "",  8),
+        ]:
+            r = tk.Frame(win, bg=BG_DARK)
+            r.pack(fill="x", padx=16, pady=2)
+            tk.Label(r, text=label, font=("Arial", 9), bg=BG_DARK,
+                     fg=TEXT_DIM, width=8, anchor="w").pack(side="left")
+            var = tk.StringVar(value=default)
+            e = tk.Entry(r, textvariable=var, font=("Arial", 9),
+                         bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                         relief="flat", width=w)
+            e.pack(side="left")
+            entries[key] = var
+            if first_entry is None:
+                first_entry = e
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=(8, 12))
+
+        def _do_add():
+            d = {k: v.get() for k, v in entries.items()}
+            if not d.get("name"):
+                d["name"] = "Item"
+            self._add_misc_row(d)
+            win.destroy()
+
+        tk.Button(btn_row, text="Add", font=("Arial", 9, "bold"),
+                  bg=ACCENT, fg="white", relief="flat", cursor="hand2",
+                  command=_do_add).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel", font=("Arial", 9),
+                  bg=BG_MID, fg=TEXT_MAIN, relief="flat", cursor="hand2",
+                  command=win.destroy).pack(side="left", padx=4)
+        if first_entry:
+            win.after(50, first_entry.focus_set)
+
+    # ── Equipment row builders ────────────────────────────────────────────────
+    def _add_weapon_row(self, category, data):
+        rc = self._weapon_row_containers.get(category)
+        if rc is None:
+            return
+
+        sep = tk.Frame(rc, bg=BORDER, height=1)
+        sep.pack(fill="x")
+        row = tk.Frame(rc, bg=BG_CARD)
+        row.pack(fill="x", padx=2, pady=1)
+
+        cols = self._WPN_COLS.get(category, [])
+
+        right = tk.Frame(row, bg=BG_CARD)
+        right.pack(side="right")
+
+        x_lbl = tk.Label(right, text="×", font=("Arial", 9, "bold"),
+                         bg=BG_CARD, fg=TEXT_DIM, cursor="hand2", width=2)
+        x_lbl.pack(side="right")
+
+        for col_lbl, field_key, col_w in reversed(cols):
+            if field_key == "str_range":
+                smin = str(data.get("str_min", "?"))
+                smax = str(data.get("str_max", "?"))
+                val_str = f"{smin}-{smax}"
+            else:
+                val = data.get(field_key)
+                val_str = "—" if (val is None or str(val) in ("None", "null", "")) else str(val)
+            tk.Label(right, text=val_str, font=("Arial", 8),
+                     bg=BG_CARD, fg=TEXT_MAIN, width=col_w,
+                     anchor="center").pack(side="right")
+
+        if category == "grenades":
+            special = str(data.get("special", ""))
+            tk.Label(row, text=special, font=("Arial", 8),
+                     bg=BG_CARD, fg=TEXT_DIM, anchor="w").pack(
+                         side="right", fill="x", expand=True, padx=(4, 0))
+            name_var = tk.StringVar(value=str(data.get("name", "")))
+            name_var.trace_add("write", lambda *_: self._mark_dirty())
+            tk.Entry(row, textvariable=name_var, font=("Arial", 9, "bold"),
+                     bg=BG_CARD, fg=GOLD, insertbackground=GOLD,
+                     relief="flat", highlightthickness=0,
+                     width=14).pack(side="left", padx=(2, 4))
+        else:
+            name_var = tk.StringVar(value=str(data.get("name", "")))
+            name_var.trace_add("write", lambda *_: self._mark_dirty())
+            tk.Entry(row, textvariable=name_var, font=("Arial", 9, "bold"),
+                     bg=BG_CARD, fg=GOLD, insertbackground=GOLD,
+                     relief="flat", highlightthickness=0).pack(
+                         side="left", fill="x", expand=True, padx=(2, 4))
+
+        entry = {"category": category, "frame": row, "sep": sep,
+                 "name_var": name_var, "data": data}
+        self._equip_weapons.append(entry)
+        self._sync_weapon_attacks()
+
+        def _remove(e=entry, f=row, s=sep):
+            self._equip_weapons = [x for x in self._equip_weapons if x is not e]
+            self.after(0, f.destroy)
+            self.after(0, s.destroy)
+            self._sync_weapon_attacks()
+            self._mark_dirty()
+
+        x_lbl.bind("<Button-1>", lambda ev, fn=_remove: self.after(0, fn))
+        self._mark_dirty()
+
+    def _add_armor_row(self, data, is_eufiber=False):
+        sep = tk.Frame(self._armor_rows_container, bg=BORDER, height=1)
+        sep.pack(fill="x")
+        row = tk.Frame(self._armor_rows_container, bg=BG_CARD)
+        row.pack(fill="x", padx=2, pady=1)
+
+        right = tk.Frame(row, bg=BG_CARD)
+        right.pack(side="right")
+
+        if is_eufiber:
+            tk.Label(right, text=" ", font=("Arial", 9), bg=BG_CARD, width=2).pack(side="right")
+        else:
+            x_lbl = tk.Label(right, text="×", font=("Arial", 9, "bold"),
+                             bg=BG_CARD, fg=TEXT_DIM, cursor="hand2", width=2)
+            x_lbl.pack(side="right")
+
+        stat_vars = {}
+        for col_lbl, field_key, col_w in reversed(self._ARMOR_COLS):
+            val = data.get(field_key)
+            val_str = "—" if (val is None or str(val) in ("None", "null", "")) else str(val)
+            sv = tk.StringVar(value=val_str)
+            stat_vars[field_key] = sv
+            tk.Label(right, textvariable=sv, font=("Arial", 8),
+                     bg=BG_CARD, fg=GOLD if is_eufiber else TEXT_MAIN,
+                     width=col_w, anchor="center").pack(side="right")
+
+        name_var = tk.StringVar(value=str(data.get("name", "")))
+        if is_eufiber:
+            tk.Label(row, textvariable=name_var, font=("Arial", 9, "bold", "italic"),
+                     bg=BG_CARD, fg=GOLD, anchor="w").pack(
+                         side="left", fill="x", expand=True, padx=(2, 4))
+        else:
+            name_var.trace_add("write", lambda *_: self._mark_dirty())
+            tk.Entry(row, textvariable=name_var, font=("Arial", 9, "bold"),
+                     bg=BG_CARD, fg=GOLD, insertbackground=GOLD,
+                     relief="flat", highlightthickness=0).pack(
+                         side="left", fill="x", expand=True, padx=(2, 4))
+
+        equipped_var = tk.BooleanVar(value=bool(data.get("equipped", False)))
+        entry = {"is_eufiber": is_eufiber, "frame": row, "sep": sep,
+                 "name_var": name_var, "stat_vars": stat_vars, "data": data,
+                 "equipped_var": equipped_var}
+        self._equip_armor.append(entry)
+        self._sync_combat_armor()
+
+        if not is_eufiber:
+            def _remove(e=entry, f=row, s=sep):
+                self._equip_armor = [x for x in self._equip_armor if x is not e]
+                self.after(0, f.destroy)
+                self.after(0, s.destroy)
+                self._sync_combat_armor()
+                self._mark_dirty()
+            x_lbl.bind("<Button-1>", lambda ev, fn=_remove: self.after(0, fn))
+            self._mark_dirty()
+
+        return entry
+
+    def _add_misc_row(self, data):
+        sep = tk.Frame(self._misc_rows_container, bg=BORDER, height=1)
+        sep.pack(fill="x")
+        row = tk.Frame(self._misc_rows_container, bg=BG_CARD)
+        row.pack(fill="x", padx=2, pady=1)
+
+        right = tk.Frame(row, bg=BG_CARD)
+        right.pack(side="right")
+
+        x_lbl = tk.Label(right, text="×", font=("Arial", 9, "bold"),
+                         bg=BG_CARD, fg=TEXT_DIM, cursor="hand2", width=2)
+        x_lbl.pack(side="right")
+
+        cost_var = tk.StringVar(value=str(data.get("cost", "")))
+        cost_var.trace_add("write", lambda *_: self._mark_dirty())
+        tk.Entry(right, textvariable=cost_var, font=("Arial", 8),
+                 bg=BG_MID, fg=TEXT_MAIN, insertbackground=TEXT_MAIN,
+                 relief="flat", width=6).pack(side="right", padx=(0, 2))
+
+        name_var = tk.StringVar(value=str(data.get("name", "")))
+        name_var.trace_add("write", lambda *_: self._mark_dirty())
+        tk.Entry(row, textvariable=name_var, font=("Arial", 9, "bold"),
+                 bg=BG_CARD, fg=GOLD, insertbackground=GOLD,
+                 relief="flat", highlightthickness=0,
+                 width=16).pack(side="left", padx=(2, 4))
+
+        notes_var = tk.StringVar(value=str(data.get("notes", "")))
+        notes_var.trace_add("write", lambda *_: self._mark_dirty())
+        tk.Entry(row, textvariable=notes_var, font=("Arial", 8),
+                 bg=BG_CARD, fg=TEXT_DIM, insertbackground=TEXT_DIM,
+                 relief="flat", highlightthickness=0).pack(
+                     side="left", fill="x", expand=True, padx=(0, 4))
+
+        entry = {"frame": row, "sep": sep, "name_var": name_var,
+                 "notes_var": notes_var, "cost_var": cost_var}
+        self._equip_misc.append(entry)
+
+        def _remove(e=entry, f=row, s=sep):
+            self._equip_misc = [x for x in self._equip_misc if x is not e]
+            self.after(0, f.destroy)
+            self.after(0, s.destroy)
+            self._mark_dirty()
+
+        x_lbl.bind("<Button-1>", lambda ev, fn=_remove: self.after(0, fn))
+        self._mark_dirty()
+
+    def _sync_weapon_attacks(self, *_):
+        if not hasattr(self, "_weapon_atk_container"):
+            return
+        for var, tid in getattr(self, "_weapon_atk_traces", []):
+            try: var.trace_remove("write", tid)
+            except Exception: pass
+        self._weapon_atk_traces = []
+        for w in self._weapon_atk_container.winfo_children():
+            w.destroy()
+
+        cat_ability = {
+            "melee":    "Melee",
+            "ranged":   "Firearms",
+            "heavy":    "Firearms",
+            "grenades": "Athletics",
+        }
+        dex_var  = self._attr_vars.get("DEXTERITY")
+        mdex_var = self._mega_vars.get("Mega-Dexterity")
+        str_var  = self._attr_vars.get("STRENGTH")
+
+        for entry in getattr(self, "_equip_weapons", []):
+            cat          = entry.get("category", "melee")
+            ability_name = cat_ability.get(cat, "Melee")
+            name_var     = entry["name_var"]
+            damage_str   = str(entry["data"].get("damage", "—"))
+            acc_raw      = entry["data"].get("accuracy", None)
+
+            sep = tk.Frame(self._weapon_atk_container, bg=BORDER, height=1)
+            sep.pack(fill="x")
+            row = tk.Frame(self._weapon_atk_container, bg=BG_CARD)
+            row.pack(fill="x", padx=2, pady=2)
+
+            right = tk.Frame(row, bg=BG_CARD)
+            right.pack(side="right")
+
+            tk.Label(right, text=" ", font=("Arial", 9), bg=BG_CARD,
+                     width=2).pack(side="right")
+            tk.Label(right, text="—", font=("Arial", 8),
+                     bg=BG_CARD, fg=TEXT_DIM, width=6, anchor="center").pack(side="right")
+
+            if acc_raw is not None and str(acc_raw) not in ("0", "", "None"):
+                try:
+                    acc_text  = f"+{int(acc_raw)}" if int(acc_raw) > 0 else str(acc_raw)
+                    acc_color = TEXT_MAIN
+                except (ValueError, TypeError):
+                    acc_text  = str(acc_raw)
+                    acc_color = TEXT_MAIN
+            else:
+                acc_text  = "—"
+                acc_color = TEXT_DIM
+            tk.Label(right, text=acc_text, font=("Arial", 8),
+                     bg=BG_CARD, fg=acc_color, width=6, anchor="center").pack(side="right")
+
+            dmg_frame = tk.Frame(right, bg=BG_CARD, width=64)
+            dmg_frame.pack(side="right")
+            dmg_frame.pack_propagate(False)
+            str_match = re.match(
+                r'(?i)strength\s*\+\s*(\d+)d10$', damage_str.strip())
+            if str_match and str_var:
+                wpn_bonus = int(str_match.group(1))
+                dmg_sv = tk.StringVar()
+                def _upd_wpn(*_, _sv=str_var, _b=wpn_bonus, _ds=dmg_sv):
+                    _ds.set(f"{_sv.get() + _b}d10")
+                self._weapon_atk_traces.append(
+                    (str_var, str_var.trace_add("write", _upd_wpn)))
+                _upd_wpn()
+                tk.Label(dmg_frame, textvariable=dmg_sv, font=("Arial", 7),
+                         bg=BG_CARD, fg=TEXT_MAIN, anchor="center").pack(expand=True)
+            else:
+                tk.Label(dmg_frame, text=damage_str, font=("Arial", 7),
+                         bg=BG_CARD, fg=TEXT_MAIN, anchor="center",
+                         wraplength=62).pack(expand=True)
+
+            tk.Label(row, textvariable=name_var, font=("Arial", 9, "bold"),
+                     bg=BG_CARD, fg=GOLD, width=16, anchor="w").pack(side="left")
+
+            pool_section = tk.Frame(row, bg=BG_CARD)
+            pool_section.pack(side="left", fill="x", expand=True)
+            pool_row = tk.Frame(pool_section, bg=BG_CARD)
+            pool_row.pack(fill="x")
+
+            ability_var = self._ability_vars.get(ability_name)
+            num_sv   = tk.StringVar()
+            mega_sv  = tk.StringVar()
+            break_sv = tk.StringVar()
+
+            def _upd(*_, _dv=dex_var, _mv=mdex_var, _av=ability_var,
+                     _ns=num_sv, _ms=mega_sv, _bs=break_sv, _ab=ability_name):
+                dv = _dv.get() if _dv else 0
+                av = _av.get() if _av else 0
+                mv = _mv.get() if _mv else 0
+                _ns.set(str(dv + av))
+                _ms.set(f" ({mv})" if mv > 0 else "")
+                _bs.set(f" Dex {dv} + {_ab} {av}")
+
+            if dex_var:
+                self._weapon_atk_traces.append(
+                    (dex_var, dex_var.trace_add("write", _upd)))
+            if mdex_var:
+                self._weapon_atk_traces.append(
+                    (mdex_var, mdex_var.trace_add("write", _upd)))
+            if ability_var:
+                self._weapon_atk_traces.append(
+                    (ability_var, ability_var.trace_add("write", _upd)))
+            _upd()
+
+            pool_num = tk.Label(pool_row, textvariable=num_sv,
+                     font=tkfont.Font(family="Arial", size=9, weight="bold", underline=True),
+                     bg=BG_CARD, fg=_DICE_COLOR, width=4, anchor="e", cursor="hand2")
+            pool_num.pack(side="left")
+            pool_num.bind("<Button-1>", lambda e: None)
+            tk.Label(pool_row, textvariable=mega_sv, font=("Arial", 8),
+                     bg=BG_CARD, fg=_MEGA_COLOR).pack(side="left")
+            tk.Label(pool_row, textvariable=break_sv, font=("Arial", 8),
+                     bg=BG_CARD, fg=TEXT_DIM).pack(side="left")
+
+    def _sync_eufiber_armor(self, *_):
+        if not hasattr(self, "_equip_armor"):
+            return
+        level = 0
+        for nv, vv, _ in getattr(self, "_bg_rows", []):
+            if nv.get().strip().lower() == "eufiber":
+                level = max(level, vv.get())
+
+        eufiber_entry = next((e for e in self._equip_armor if e.get("is_eufiber")), None)
+
+        if level > 0:
+            if eufiber_entry is None:
+                self._add_armor_row({
+                    "name": "Eufiber",
+                    "soak_bashing": level,
+                    "soak_lethal":  level,
+                    "protection":   "Full Body",
+                    "penalty":      0,
+                    "conceal":      "J",
+                    "cost_dots":    "",
+                    "destruction":  "",
+                }, is_eufiber=True)
+            else:
+                eufiber_entry["stat_vars"]["soak_bashing"].set(str(level))
+                eufiber_entry["stat_vars"]["soak_lethal"].set(str(level))
+        elif eufiber_entry is not None:
+            self._equip_armor = [e for e in self._equip_armor if not e.get("is_eufiber")]
+            self.after(0, eufiber_entry["frame"].destroy)
+            self.after(0, eufiber_entry["sep"].destroy)
+            self._sync_combat_armor()
+
+    def _sync_combat_armor(self, *_):
+        if not hasattr(self, "_combat_armor_container"):
+            return
+        for w in self._combat_armor_container.winfo_children():
+            w.destroy()
+        for entry in getattr(self, "_equip_armor", []):
+            sep = tk.Frame(self._combat_armor_container, bg=BORDER, height=1)
+            sep.pack(fill="x")
+            row = tk.Frame(self._combat_armor_container, bg=BG_CARD)
+            row.pack(fill="x", padx=2, pady=1)
+
+            right = tk.Frame(row, bg=BG_CARD)
+            right.pack(side="right")
+
+            for _, field_key, col_w in [
+                ("PENALTY", "penalty",      8),
+                ("PROTECT", "protection",   9),
+                ("SOAK L",  "soak_lethal",  7),
+                ("SOAK B",  "soak_bashing", 7),
+            ]:
+                sv = entry["stat_vars"].get(field_key)
+                fg = GOLD if entry.get("is_eufiber") else TEXT_MAIN
+                if sv:
+                    tk.Label(right, textvariable=sv, font=("Arial", 8),
+                             bg=BG_CARD, fg=fg,
+                             width=col_w, anchor="center").pack(side="right")
+                else:
+                    tk.Label(right, text="—", font=("Arial", 8),
+                             bg=BG_CARD, fg=TEXT_DIM,
+                             width=col_w, anchor="center").pack(side="right")
+
+            eq_cb = CheckBox(right, var=entry["equipped_var"], size=14, bg=BG_CARD)
+            eq_cb.pack(side="right", padx=(4, 2))
+
+            name_var = entry.get("name_var")
+            if entry.get("is_eufiber"):
+                tk.Label(row, textvariable=name_var,
+                         font=("Arial", 9, "bold", "italic"),
+                         bg=BG_CARD, fg=GOLD, anchor="w").pack(
+                             side="left", fill="x", expand=True, padx=(2, 0))
+            else:
+                tk.Label(row, textvariable=name_var, font=("Arial", 9),
+                         bg=BG_CARD, fg=TEXT_MAIN, anchor="w").pack(
+                             side="left", fill="x", expand=True, padx=(2, 0))
 
     # ── Health panel (right side) ─────────────────────────────────────────────
     HEALTH_STATES = [
@@ -2751,8 +3975,8 @@ class CharacterFrame(tk.Frame):
                                   for k, lst in getattr(self, "_health_bash", {}).items()}
         c["health_leth"]      = {k: [sv.get() for sv in lst]
                                   for k, lst in getattr(self, "_health_leth", {}).items()}
-        c["attacks"] = [{k: v.get() for k, v in row.items()} for row in self._attack_vars]
-        c["armors"]  = [{k: v.get() for k, v in row.items()} for row in self._armor_vars]
+        c["combat_attacks"] = [e["maneuver"] for e in self._attack_cards]
+        c["armors"]  = []   # flushed — armor now lives in equipment_armor
         c["soak_bashing"] = self._soak_vars["bashing"].get()
         c["soak_lethal"]  = self._soak_vars["lethal"].get()
         c["game_notes"]   = self._notes_text.get("1.0", "end-1c")
@@ -2762,6 +3986,25 @@ class CharacterFrame(tk.Frame):
             ma: [[e[0], e[1].get()] for e in lst]
             for ma, lst in self._mega_enhancements.items()
         }
+        c["equipment_weapons"] = []
+        for e in self._equip_weapons:
+            d = dict(e["data"])
+            d["name"]     = e["name_var"].get()
+            d["category"] = e["category"]
+            c["equipment_weapons"].append(d)
+        c["equipment_armor"] = []
+        for e in self._equip_armor:
+            if e.get("is_eufiber"):
+                continue
+            d = {"name": e["name_var"].get(), "equipped": e["equipped_var"].get()}
+            d.update({k: sv.get() for k, sv in e["stat_vars"].items()})
+            c["equipment_armor"].append(d)
+        c["equipment_misc"] = [
+            {"name": e["name_var"].get(),
+             "notes": e["notes_var"].get(),
+             "cost":  e["cost_var"].get()}
+            for e in self._equip_misc
+        ]
         c["portrait"]    = self._portrait_b64
         c["app_version"] = APP_VERSION
         return c
@@ -2847,16 +4090,16 @@ class CharacterFrame(tk.Frame):
             if k in self._health_leth:
                 for j, sv in enumerate(self._health_leth[k]):
                     if j < len(vals): sv.set(vals[j])
-        for i, row in enumerate(self._attack_vars):
-            atk = c.get("attacks", [{}] * 5)
-            entry = atk[i] if i < len(atk) else {}
-            for k, v in row.items():
-                v.set(entry.get(k, ""))
-        for i, row in enumerate(self._armor_vars):
-            arm = c.get("armors", [{}] * 5)
-            entry = arm[i] if i < len(arm) else {}
-            for k, v in row.items():
-                v.set(entry.get(k, ""))
+        for ae in list(self._attack_cards):
+            for var, tid in ae.get("traces", []):
+                try: var.trace_remove("write", tid)
+                except Exception: pass
+            ae["frame"].destroy()
+            if "sep" in ae:
+                ae["sep"].destroy()
+        self._attack_cards.clear()
+        for name in c.get("combat_attacks", ["Strike", "Kick"]):
+            self._add_attack_card(name)
         self._soak_vars["bashing"].set(c.get("soak_bashing", ""))
         self._soak_vars["lethal"].set(c.get("soak_lethal", ""))
         self._notes_text.delete("1.0", "end")
@@ -2873,6 +4116,27 @@ class CharacterFrame(tk.Frame):
             self._mega_enhancements[ma] = bvs
         for ma, fn in self._mega_enh_refresh.items():
             fn()
+        for e in list(self._equip_weapons):
+            e["frame"].destroy()
+            e["sep"].destroy()
+        self._equip_weapons.clear()
+        for e in list(self._equip_armor):
+            e["frame"].destroy()
+            e["sep"].destroy()
+        self._equip_armor.clear()
+        for e in list(self._equip_misc):
+            e["frame"].destroy()
+            e["sep"].destroy()
+        self._equip_misc.clear()
+        for w in c.get("equipment_weapons", []):
+            self._add_weapon_row(w.get("category", "melee"), w)
+        for a in c.get("equipment_armor", []):
+            self._add_armor_row(a)
+        for m in c.get("equipment_misc", []):
+            self._add_misc_row(m)
+        self._sync_eufiber_armor()
+        self._sync_combat_armor()
+        self._sync_weapon_attacks()
         self._portrait_b64 = c.get("portrait", "")
         self._refresh_portrait()
 
